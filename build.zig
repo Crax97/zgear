@@ -1,11 +1,5 @@
 const std = @import("std");
 
-// fn sdk_path(comptime path: []const u8) []const u8 {
-//     const src = @src();
-//     const source = comptime std.fs.path.dirname(src.file) orelse ".";
-//     return source ++ path;
-// }
-
 fn build_core_module(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode) *std.Build.Module {
     return b.addModule("core", .{
         .root_source_file = b.path("core/main.zig"),
@@ -56,7 +50,6 @@ fn build_renderer_module(b: *std.Build, target: std.Build.ResolvedTarget, optimi
     if (target.result.os.tag == .windows) {
         renderer.addLibraryPath(b.path("thirdparty/sdl/x86_64-w64/bin/"));
         renderer.addLibraryPath(b.path("thirdparty/sdl/x86_64-w64/lib/"));
-        b.installBinFile("thirdparty/sdl/x86_64-w64/bin/SDL2.dll", "SDL2.dll");
     }
 
     // Vulkan
@@ -100,7 +93,6 @@ fn build_engine_module(b: *std.Build, target: std.Build.ResolvedTarget, optimize
     if (target.result.os.tag == .windows) {
         // For now only x64 is supported
         engine.addLibraryPath(b.path("thirdparty/openal/libs/Win64/"));
-        b.installBinFile("thirdparty/openal/bin/Win64/soft_oal.dll", "OpenAL32.dll");
 
         engine.linkSystemLibrary("openal32", .{});
     } else if (target.result.os.tag == .linux) {

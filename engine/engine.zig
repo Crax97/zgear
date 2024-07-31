@@ -101,8 +101,11 @@ pub const Engine = struct {
         return &this.world;
     }
 
-    pub fn run_loop(this: *Engine, game: Game) !void {
-        try game.init(game.target, this);
+    pub fn run_loop(this: *Engine, game_ptr: anytype) !void {
+        const game_type_info = @typeInfo(@TypeOf(game_ptr));
+        if (game_type_info != .Pointer) @compileError("game_ptr must be a pointer to struct!");
+        var game_inst = Game.make(game_type_info.Pointer.child, game_ptr);
+        try game_inst.init(game_inst.target, this);
 
         engine_instance_ptr = this;
 
@@ -121,7 +124,7 @@ pub const Engine = struct {
 
             input.update();
             try this.renderer.start_rendering();
-            try game.update(game.target, this, time.delta_seconds());
+            try game_inst.update(game_inst.target, this, time.delta_seconds());
             try this.world.update(time.delta_seconds());
             try this.renderer.render(this.window.viewport_extents());
             input.end_frame();
@@ -129,7 +132,7 @@ pub const Engine = struct {
         }
 
         try this.world.destroy();
-        try game.end(game.target, this);
+        try game_inst.end(game_inst.target, this);
     }
 };
 
