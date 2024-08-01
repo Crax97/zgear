@@ -11,13 +11,15 @@ const sdl_util = renderer.sdl_util;
 const c = renderer.c;
 
 pub const World = ecs.World;
-pub const TextureHandle = renderer.TextureHandle;
 
 pub const FontManager = fonts.FontManager;
 pub const FontHandle = fonts.FontHandle;
 pub const FontDescription = fonts.FontDescription;
-
 pub const Texture = renderer.Texture;
+pub const TextureHandle = renderer.TextureHandle;
+pub const Vertex = renderer.Vertex;
+pub const Mesh = renderer.Mesh;
+pub const MeshHandle = renderer.MeshHandle;
 pub const AudioSystem = audio_system.AudioSystem;
 pub const SoundEffectHandle = audio_system.SoundEffectHandle;
 

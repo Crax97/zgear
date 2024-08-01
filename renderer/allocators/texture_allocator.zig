@@ -31,18 +31,32 @@ pub const TextureAllocator = struct {
     unused_handles: std.ArrayList(TextureHandle),
     updates: std.ArrayList(BindlessSetUpdate),
 
-    pub fn init(device: VkDevice, allocator: Allocator, vma: c.VmaAllocator) !TextureAllocator {
+    pub fn init(device: VkDevice, allocator: Allocator, vma: c.VmaAllocator, mesh_buf: c.VkBuffer) !TextureAllocator {
         var layout: c.VkDescriptorSetLayout = undefined;
-        const bindings = [_]c.VkDescriptorSetLayoutBinding{c.VkDescriptorSetLayoutBinding{
-            .descriptorType = c.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-            .descriptorCount = num_descriptors,
-            .binding = bindless_textures_binding,
-            .stageFlags = c.VK_SHADER_STAGE_ALL,
-            .pImmutableSamplers = null,
-        }};
+        const bindings = [_]c.VkDescriptorSetLayoutBinding{
+            c.VkDescriptorSetLayoutBinding{
+                .descriptorType = c.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                .descriptorCount = num_descriptors,
+                .binding = bindless_textures_binding,
+                .stageFlags = c.VK_SHADER_STAGE_ALL,
+                .pImmutableSamplers = null,
+            },
+            c.VkDescriptorSetLayoutBinding{
+                .descriptorType = c.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                .descriptorCount = num_descriptors,
+                .binding = 1,
+                .stageFlags = c.VK_SHADER_STAGE_ALL,
+                .pImmutableSamplers = null,
+            },
+        };
 
         const bindless_flags: u32 = @intCast(c.VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT | c.VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT);
-        const bindless_info = c.VkDescriptorSetLayoutBindingFlagsCreateInfoEXT{ .sType = c.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO, .pNext = null, .bindingCount = 1, .pBindingFlags = &bindless_flags };
+        const bindless_info = c.VkDescriptorSetLayoutBindingFlagsCreateInfoEXT{
+            .sType = c.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO,
+            .pNext = null,
+            .bindingCount = 2,
+            .pBindingFlags = &bindless_flags,
+        };
 
         const info = c.VkDescriptorSetLayoutCreateInfo{
             .sType = c.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
@@ -54,10 +68,16 @@ pub const TextureAllocator = struct {
 
         vk_check(c.vkCreateDescriptorSetLayout(device.handle, &info, null, &layout), "Failed to create vk descriptor set layout");
 
-        const pool_sizes = [_]c.VkDescriptorPoolSize{c.VkDescriptorPoolSize{
-            .type = c.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-            .descriptorCount = num_descriptors,
-        }};
+        const pool_sizes = [_]c.VkDescriptorPoolSize{
+            c.VkDescriptorPoolSize{
+                .type = c.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                .descriptorCount = num_descriptors,
+            },
+            c.VkDescriptorPoolSize{
+                .type = c.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                .descriptorCount = num_descriptors,
+            },
+        };
         const pool_info = c.VkDescriptorPoolCreateInfo{
             .sType = c.VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
             .flags = c.VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT,
@@ -98,6 +118,28 @@ pub const TextureAllocator = struct {
             .mipmapMode = c.VK_SAMPLER_MIPMAP_MODE_NEAREST,
         };
         vk_check(c.vkCreateSampler(device.handle, &sampler_create, null, &nearest_sampler), "Failed to create nearest sampler");
+        const buf_info = c.VkDescriptorBufferInfo{
+            .buffer = mesh_buf,
+            .offset = 0,
+            .range = c.VK_WHOLE_SIZE,
+        };
+
+        const writes = [_]c.VkWriteDescriptorSet{
+            c.VkWriteDescriptorSet{
+                .sType = c.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+                .pNext = null,
+                .dstArrayElement = 0,
+                .dstSet = descriptor_set,
+                .dstBinding = 1,
+                .pTexelBufferView = null,
+                .pBufferInfo = &buf_info,
+                .pImageInfo = null,
+                .descriptorCount = 1,
+                .descriptorType = c.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+            },
+        };
+
+        c.vkUpdateDescriptorSets(device.handle, @intCast(1), &writes, 0, null);
 
         return .{
             .all_textures = Textures.init(allocator),

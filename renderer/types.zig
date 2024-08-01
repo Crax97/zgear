@@ -1,5 +1,9 @@
 const std = @import("std");
+const math = @import("math");
 const c = @import("clibs.zig");
+
+const Vec3 = math.Vec3;
+const Vec2 = math.Vec2;
 
 pub fn Handle(comptime T: type) type {
     _ = T;
@@ -13,7 +17,13 @@ pub fn Handle(comptime T: type) type {
     };
 }
 pub const TextureHandle = Handle(Texture);
+pub const MeshHandle = Handle(Mesh);
 pub const BufferHandle = Handle(Buffer);
+
+pub const Span = struct {
+    offset: c.VkDeviceSize,
+    size: c.VkDeviceSize,
+};
 
 pub const Texture = struct {
     pub const CreateInfo = struct {
@@ -31,6 +41,21 @@ pub const Texture = struct {
     view: c.VkImageView,
     sampler: c.VkSampler,
     allocation: c.VmaAllocation,
+};
+
+pub const Vertex = extern struct {
+    position: Vec3,
+    uv_x: f32,
+    normal: Vec3,
+    uv_y: f32,
+    vertex_color: Vec3,
+};
+pub const Mesh = struct {
+    pub const CreateInfo = struct {
+        vertices: []const Vertex,
+    };
+    span: Span,
+    allocation: c.VmaVirtualAllocation,
 };
 
 pub const Filter = enum {

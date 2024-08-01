@@ -142,6 +142,14 @@ pub fn build(b: *std.Build) void {
 
     compile_shaders(b, sdk.renderer_module);
 
+    const check_exe = b.addExecutable(.{
+        .name = "check_target",
+        .root_source_file = b.path("zgear_dummy.zig"),
+        .optimize = optimize,
+        .target = target,
+    });
+    sdk.add_to_target(check_exe);
+
     const test_step = b.step("test", "Run unit tests");
 
     add_tests(

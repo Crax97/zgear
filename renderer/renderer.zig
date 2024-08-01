@@ -2,6 +2,7 @@ const std = @import("std");
 const math = @import("math");
 const sdl_util = @import("sdl_util.zig");
 const sampler_allocator = @import("allocators/sampler_allocator.zig");
+const mesh_allocator = @import("allocators/mesh_allocator.zig");
 const rta = @import("allocators/render_target_allocator.zig");
 const ta = @import("allocators/texture_allocator.zig");
 pub const c = @import("clibs.zig");
@@ -21,6 +22,9 @@ const RenderTarget = rta.RenderTarget;
 const RenderTargetAllocator = rta.RenderTargetAllocator;
 const TextureAllocator = ta.TextureAllocator;
 const TextureAllocation = ta.TextureAllocation;
+const Mesh = types.Mesh;
+const MeshHandle = types.MeshHandle;
+const MeshAllocation = mesh_allocator.MeshAllocator.Allocation;
 
 const Vec2 = math.Vec2;
 const Vec4 = math.Vec4;
@@ -64,6 +68,7 @@ pub const Renderer = struct {
     render_list: RenderList,
     texture_allocator: TextureAllocator,
     sampler_allocator: sampler_allocator.SamplerAllocator,
+    mesh_allocator: mesh_allocator.MeshAllocator,
 
     white_texture: TextureHandle = undefined,
 
@@ -77,6 +82,7 @@ pub const Renderer = struct {
     pub fn init(window: *c.SDL_Window, allocator: Allocator) !Renderer {
         const instance = try create_vulkan_instance(window, allocator);
         errdefer c.vkDestroyInstance(instance, null);
+        std.log.info("Created Vulkan instance\n", .{});
 
         const debug_utils = DebugUtilsMessengerExt.init(instance);
 
@@ -86,11 +92,10 @@ pub const Renderer = struct {
         const physical_device = try select_physical_device(instance, allocator);
         const device = try init_logical_device(physical_device, surface, allocator);
         errdefer c.vkDestroyDevice(device.handle, null);
+        std.log.info("Picked device {s}\n", .{physical_device.properties.deviceName});
 
         var swapchain = Swapchain{};
         try swapchain.init(window, instance, physical_device.device, device.handle, surface, device.queue.handle, device.queue.qfi, allocator);
-
-        std.log.info("Picked device {s}\n", .{physical_device.properties.deviceName});
 
         var vk_allocator: c.VmaAllocator = undefined;
 
@@ -104,8 +109,9 @@ pub const Renderer = struct {
         var render_states = try allocator.alloc(RenderState, Renderer.FRAMES_IN_FLIGHT);
         errdefer allocator.free(render_states);
 
+        const mesh_alloc = mesh_allocator.MeshAllocator.init(device, allocator, vk_allocator, .{});
         const sam_allocator = sampler_allocator.SamplerAllocator.init(allocator, device.handle);
-        const texture_allocator = try TextureAllocator.init(device, allocator, vk_allocator);
+        const texture_allocator = try TextureAllocator.init(device, allocator, vk_allocator, mesh_alloc.mesh_storage_buffer);
 
         for (0..Renderer.FRAMES_IN_FLIGHT) |i| {
             render_states[i] = try RenderState.init(device, allocator, vk_allocator);
@@ -128,6 +134,7 @@ pub const Renderer = struct {
             .render_states = render_states,
             .texture_allocator = texture_allocator,
             .sampler_allocator = sam_allocator,
+            .mesh_allocator = mesh_alloc,
 
             .default_texture_pipeline_layout = pipeline_layout,
             .default_texture_pipeline = try create_default_texture_graphics_pipeline(device, pipeline_layout),
@@ -137,17 +144,6 @@ pub const Renderer = struct {
 
         return inst;
     }
-
-    fn create_defaults(this: *Renderer) !void {
-        this.white_texture = try this.alloc_texture(.{
-            .width = 1,
-            .height = 1,
-            .format = .rgba_8,
-            .initial_bytes = &.{ 255, 255, 255, 255 },
-            .sampler_config = types.SamplerConfig.NEAREST,
-        });
-    }
-
     pub fn deinit(this: *Renderer) void {
         vk_check(c.vkDeviceWaitIdle(this.device.handle), "Failed to wait for device idle in deinit");
         for (0..Renderer.FRAMES_IN_FLIGHT) |i| {
@@ -159,6 +155,7 @@ pub const Renderer = struct {
         c.vkDestroyPipeline(this.device.handle, this.default_texture_pipeline, null);
         c.vkDestroyPipelineLayout(this.device.handle, this.default_texture_pipeline_layout, null);
 
+        this.mesh_allocator.deinit();
         this.texture_allocator.deinit(this.device);
         this.sampler_allocator.deinit();
         this.render_list.deinit();
@@ -173,6 +170,16 @@ pub const Renderer = struct {
         }
 
         c.vkDestroyInstance(this.instance, null);
+    }
+
+    fn create_defaults(this: *Renderer) !void {
+        this.white_texture = try this.alloc_texture(.{
+            .width = 1,
+            .height = 1,
+            .format = .rgba_8,
+            .initial_bytes = &.{ 255, 255, 255, 255 },
+            .sampler_config = types.SamplerConfig.NEAREST,
+        });
     }
 
     pub fn alloc_texture(this: *Renderer, description: Texture.CreateInfo) !TextureHandle {
@@ -250,6 +257,40 @@ pub const Renderer = struct {
 
     pub fn free_texture(this: *Renderer, texture: TextureHandle) void {
         this.texture_allocator.free_texture(this.device, texture);
+    }
+
+    pub fn alloc_mesh(this: *Renderer, info: Mesh.CreateInfo) !MeshHandle {
+        const allocation = try this.mesh_allocator.alloc_mesh(&info);
+        const mesh_size_bytes = @sizeOf(types.Vertex) * info.vertices.len;
+        std.debug.assert(mesh_size_bytes <= allocation.mesh.span.size);
+
+        const staging_buffer = try this.create_staging_buffer(mesh_size_bytes);
+        var alloc_info = std.mem.zeroes(c.VmaAllocationInfo);
+        c.vmaGetAllocationInfo(this.vk_allocator, staging_buffer.allocation, &alloc_info);
+        const ptr: [*]u8 = @ptrCast(alloc_info.pMappedData);
+        const bytes = std.mem.sliceAsBytes(info.vertices);
+        @memcpy(ptr, bytes);
+
+        const cmd_buf = try this.allocate_oneshot_command_buffer();
+        const regions = &[_]c.VkBufferCopy{
+            c.VkBufferCopy{
+                .srcOffset = 0,
+                .dstOffset = allocation.mesh.span.offset,
+                .size = allocation.mesh.span.size,
+            },
+        };
+        c.vkCmdCopyBuffer(cmd_buf, staging_buffer.buffer, this.mesh_allocator.mesh_storage_buffer, 1, regions);
+
+        // it will be resetted by resetCommandPool
+        this.submit_oneshot_command_buffer(false, cmd_buf);
+        vk_check(c.vkDeviceWaitIdle(this.device.handle), "Failed to wait device idle");
+        c.vmaDestroyBuffer(this.vk_allocator, staging_buffer.buffer, staging_buffer.allocation);
+
+        return allocation.handle;
+    }
+
+    pub fn free_mesh(this: *Renderer, handle: MeshHandle) void {
+        this.mesh_allocator.free_mesh(handle);
     }
 
     pub fn start_rendering(this: *Renderer) !void {
@@ -628,6 +669,8 @@ pub const Renderer = struct {
         if (c.SDL_Vulkan_CreateSurface(window, instance, &surface) != c.SDL_TRUE) {
             sdl_util.sdl_panic();
         }
+        std.log.info("Created rendering surface\n", .{});
+
         return surface;
     }
 
@@ -707,13 +750,17 @@ pub const Renderer = struct {
         surface: c.VkSurfaceKHR,
         allocator: Allocator,
     ) !VkDevice {
+        std.log.info("Creating VkDevice", .{});
+
+        std.log.info("\tChecking for extension avalability", .{});
+        try ensure_device_extensions_are_available(physical_device, allocator);
+
+        std.log.info("\tPicking the main queue", .{});
         var props_count: u32 = undefined;
         c.vkGetPhysicalDeviceQueueFamilyProperties(physical_device.device, &props_count, null);
         const props = try allocator.alloc(c.VkQueueFamilyProperties, props_count);
         defer allocator.free(props);
         c.vkGetPhysicalDeviceQueueFamilyProperties(physical_device.device, &props_count, props.ptr);
-
-        try ensure_device_extensions_are_available(physical_device, allocator);
 
         var graphics_qfi: ?u32 = null;
         for (props, 0..) |prop, idx| {
@@ -727,6 +774,8 @@ pub const Renderer = struct {
             vulkan_failure("Failed to pick a vulkan graphics queue");
         }
 
+        std.log.info("\tPicked queue family {d}, now creating actual device", .{graphics_qfi.?});
+
         const prios: [1]f32 = .{1.0};
 
         const queue_create_info: [1]c.VkDeviceQueueCreateInfo = .{
@@ -738,12 +787,11 @@ pub const Renderer = struct {
             },
         };
 
-        var buffer_ext = c.VkPhysicalDeviceBufferDeviceAddressFeatures{
-            .sType = c.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES,
-            .pNext = null,
-            .bufferDeviceAddress = c.VK_TRUE,
-            .bufferDeviceAddressCaptureReplay = c.VK_TRUE,
-        };
+        var buffer_ext = std.mem.zeroes(c.VkPhysicalDeviceBufferDeviceAddressFeatures);
+        buffer_ext.sType = c.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES;
+        buffer_ext.pNext = null;
+        buffer_ext.bufferDeviceAddress = c.VK_TRUE;
+        buffer_ext.bufferDeviceAddressCaptureReplay = c.VK_TRUE;
 
         // Request the features necessary for bindless texturess
         var indexing_features: c.VkPhysicalDeviceDescriptorIndexingFeatures = std.mem.zeroes(c.VkPhysicalDeviceDescriptorIndexingFeatures);
@@ -778,9 +826,11 @@ pub const Renderer = struct {
         var device: c.VkDevice = undefined;
         vk_check(c.vkCreateDevice(physical_device.device, &device_create_info, null, &device), "Failed to create device");
 
+        std.log.info("\tVkDevice created, getting the queue", .{});
         var queue: c.VkQueue = undefined;
         c.vkGetDeviceQueue(device, graphics_qfi.?, 0, &queue);
 
+        std.log.info("\tDone!", .{});
         return .{
             .handle = device,
             .queue = VkQueue{ .handle = queue, .qfi = graphics_qfi.? },
@@ -1127,7 +1177,7 @@ fn ensure_device_extensions_are_available(device: VkPhysicalDevice, allocator: A
     vk_check(c.vkEnumerateDeviceExtensionProperties(device.device, null, &supported_extension_count, extensions.ptr), "Failed to get supported extensions");
 
     outer: for (required_device_extensions) |ext| {
-        std.log.debug("Checking extension {s}", .{ext});
+        std.log.debug("\t\tChecking extension {s}", .{ext});
         const ext_zig = std.mem.span(ext);
         for (extensions) |dev_ext| {
             const dev_ext_zig_len = std.mem.len(@as([*:0]u8, @ptrCast(@constCast(&dev_ext.extensionName))));
@@ -1205,6 +1255,8 @@ const DebugUtilsMessengerExt = struct {
         const destroy_debug_messenger = loadFuncAssert(instance, c.PFN_vkDestroyDebugUtilsMessengerEXT, "vkDestroyDebugUtilsMessengerEXT");
         var debug_utils_messenger: c.VkDebugUtilsMessengerEXT = undefined;
         vk_check(create_debug_messenger(instance, &debug_utils, null, &debug_utils_messenger), "Failed to create debug messenger");
+
+        std.log.info("Created Debug messenger\n", .{});
         return .{
             .create_debug_messenger = create_debug_messenger,
             .destroy_debug_messenger = destroy_debug_messenger,
@@ -1230,6 +1282,7 @@ const Swapchain = struct {
 
     fn init(this: *Swapchain, window: *c.SDL_Window, instance: c.VkInstance, physical_device: c.VkPhysicalDevice, device: c.VkDevice, surface: c.VkSurfaceKHR, queue: c.VkQueue, qfi: u32, allocator: Allocator) !void {
         _ = instance;
+        std.log.info("Recreating swapchain", .{});
         this.deinit(device, allocator);
         if (this.images.len > 0) {
             allocator.free(this.images);
@@ -1248,6 +1301,7 @@ const Swapchain = struct {
 
         const img_format = surface_formats[0];
         const present_mode = c.VK_PRESENT_MODE_FIFO_KHR;
+
         const flags = c.VK_IMAGE_USAGE_SAMPLED_BIT | c.VK_IMAGE_USAGE_TRANSFER_SRC_BIT | c.VK_IMAGE_USAGE_TRANSFER_DST_BIT | c.VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
 
         var width_c: c_int = 0;
@@ -1266,6 +1320,10 @@ const Swapchain = struct {
         if (this.image_count < surface_info.minImageCount) {
             this.image_count = surface_info.minImageCount;
         }
+
+        std.log.info("\tFormat {s}", .{c.string_VkFormat(img_format.format)});
+        std.log.info("\tPresent mode {s}", .{c.string_VkPresentModeKHR(present_mode)});
+        std.log.info("\tWidth, height and images {d}x{d} {d}", .{ width, height, this.image_count });
 
         const swapchain_create_info = c.VkSwapchainCreateInfoKHR{
             .sType = c.VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
@@ -1298,8 +1356,10 @@ const Swapchain = struct {
         defer allocator.free(images);
         defer allocator.free(views);
 
+        std.log.info("Acquiring swapchain images", .{});
         vk_check(c.vkGetSwapchainImagesKHR(device, swapchain_instance, &presentable_images, images.ptr), "Failed to get images from swapchain");
 
+        std.log.info("Transitioning swapchain images to PRESENT_SRC", .{});
         var cmd_pool: c.VkCommandPool = undefined;
         vk_check(c.vkCreateCommandPool(
             device,
@@ -1370,8 +1430,11 @@ const Swapchain = struct {
             .pWaitSemaphoreInfos = null,
             .pSignalSemaphoreInfos = null,
         }}, null), "Failed to submit cbuffer");
+
+        std.log.info("Waiting for queue submission end", .{});
         vk_check(c.vkDeviceWaitIdle(device), "Failed to wait device idle");
         vk_check(c.vkResetCommandPool(device, cmd_pool, c.VK_COMMAND_POOL_RESET_RELEASE_RESOURCES_BIT), "Failed to reset command pool");
+        std.log.info("Swapchain created!", .{});
     }
 
     fn deinit(this: *Swapchain, device: c.VkDevice, allocator: Allocator) void {
