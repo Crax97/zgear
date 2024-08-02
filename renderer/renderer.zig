@@ -40,7 +40,7 @@ const Rect2 = math.Rect2;
 
 const vec3 = math.vec3;
 
-const Camera2D = camera.Camera2D;
+const Camera = camera.Camera;
 
 const vk_format = types.vk_format;
 
@@ -92,7 +92,7 @@ pub const Renderer = struct {
     default_texture_pipeline: c.VkPipeline,
     default_mesh_pipeline: c.VkPipeline,
 
-    camera: Camera2D = .{},
+    camera: Camera = .{},
 
     current_render_state: usize = 0,
 
@@ -521,7 +521,7 @@ pub const Renderer = struct {
             }
             var current_material = this.render_list.meshes.items[0].material;
             var current_mesh = this.render_list.meshes.items[0].mesh;
-            var mesh_drawcalls: u32 = 1;
+            var mesh_drawcalls: u32 = 0;
 
             for (this.render_list.meshes.items) |cmd| {
                 if (current_material.id != cmd.material.id) {
@@ -534,7 +534,6 @@ pub const Renderer = struct {
                     if (mesh_drawcalls > 0) {
                         const mesh = this.mesh_allocator.get(current_mesh);
                         c.vkCmdDraw(cmd_buf, mesh.num_vertices, mesh_drawcalls, 0, 0);
-                        std.debug.print("Draw mesh {d} with material {d}", .{ current_mesh.id, current_material.id });
                         push_constant.tex_buffer_address += @sizeOf(TextureDrawInfo.GpuData) * mesh_drawcalls;
                         mesh_drawcalls = 1;
                         c.vkCmdPushConstants(
