@@ -54,8 +54,8 @@ void main() {
   TexData tex_data = base.data[gl_InstanceIndex];
   vec2 tex_size = textureSize(tex2d_samplers[tex_data.tex_id], 0);
 
-  mat4 proj = scene_base.scene_data[0].projection;
-  mat4 view = scene_base.scene_data[0].view;
+  mat4 proj = scene_base.scene_data[1].projection;
+  mat4 view = scene_base.scene_data[1].view;
   mat4 mvp = proj * view * tex_data.transform;
 
   vec4 position_camera = mvp * vec4(verts[gl_VertexIndex], 1.0);

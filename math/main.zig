@@ -175,6 +175,21 @@ pub fn ortho_t(comptime T: type, left: T, right: T, bottom: T, top: T, near: T, 
     });
 }
 
+pub fn perspective(aspect: f32, fovy_degrees: f32, near: f32, far: f32) Mat4 {
+    return perspective_t(f32, aspect, fovy_degrees, near, far);
+}
+
+pub fn perspective_t(comptime T: type, aspect: T, fovy_degrees: T, near: T, far: T) mat.mat_t(T, 4) {
+    const half_fov_rad = std.math.degreesToRadians(fovy_degrees) * 0.5;
+    const tan = std.math.tan(half_fov_rad);
+    return mat.mat_t(T, 4).new_rows(.{
+        aspect / tan, 0.0,        0.0,                 0.0,
+        0.0,          -1.0 / tan, 0.0,                 0.0,
+        0.0,          0.0,        -far / (near - far), (far * near) / (near - far),
+        0.0,          0.0,        1,                   0.0,
+    });
+}
+
 test "Array" {
     const v = Vec4.new(.{ 1.0, 2.0, 3.0, 4.0 });
     try std.testing.expectEqual(1.0, v.array()[0]);

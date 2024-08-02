@@ -736,7 +736,12 @@ pub const Renderer = struct {
             const data: [*]RenderState.RenderPOV = @ptrCast(@alignCast(buffer_alloc_info.pMappedData.?));
 
             data[0] = RenderState.RenderPOV{
-                .projection_matrix = this.camera.projection_matrix(viewport_extents),
+                .projection_matrix = this.camera.perspective_matrix(viewport_extents),
+                .view_matrix = this.camera.view_matrix(),
+            };
+
+            data[1] = RenderState.RenderPOV{
+                .projection_matrix = this.camera.ortho_matrix(viewport_extents),
                 .view_matrix = this.camera.view_matrix(),
             };
         }
