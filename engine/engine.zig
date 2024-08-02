@@ -6,6 +6,7 @@ const ecs = @import("ecs");
 const fonts = @import("fonts.zig");
 const audio_system = @import("audio/audio_system.zig");
 pub const renderer = @import("renderer");
+const material_library = renderer.material_library;
 pub const wav_lib = @import("audio/wav.zig");
 const sdl_util = renderer.sdl_util;
 const c = renderer.c;
@@ -22,6 +23,9 @@ pub const Mesh = renderer.Mesh;
 pub const MeshHandle = renderer.MeshHandle;
 pub const AudioSystem = audio_system.AudioSystem;
 pub const SoundEffectHandle = audio_system.SoundEffectHandle;
+pub const Material = material_library.Material;
+pub const MaterialHandle = material_library.MaterialHandle;
+pub const MaterialLibrary = material_library.MaterialLibrary;
 
 pub const Game = struct {
     target: *anyopaque,
@@ -63,6 +67,7 @@ pub const Engine = struct {
     audio_system: AudioSystem,
     running: bool = true,
     world: World,
+    material_library: MaterialLibrary,
     allocator: std.mem.Allocator,
 
     pub fn init(window_config: window.WindowConfig, allocator: std.mem.Allocator) !Engine {
@@ -82,6 +87,7 @@ pub const Engine = struct {
             .font_manager = try FontManager.init(allocator),
             .audio_system = system,
             .world = try World.init(allocator),
+            .material_library = MaterialLibrary.init(allocator),
             .allocator = allocator,
         };
     }
@@ -90,6 +96,7 @@ pub const Engine = struct {
         input.deinit();
         this.audio_system.deinit();
         this.font_manager.deinit(&this.renderer);
+        this.material_library.deinit();
         this.renderer.deinit();
         this.window.deinit();
         c.SDL_Quit();

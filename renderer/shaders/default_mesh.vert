@@ -24,7 +24,7 @@ struct SceneData {
   mat4 view;
 };
 
-layout(set = 0, binding = 0) uniform Geometry { Vertex vertices[]; };
+layout(set = 0, binding = 0) readonly buffer Geometry { Vertex vertices[]; };
 layout(set = 0, binding = 6) uniform sampler2D[] tex2d_samplers;
 
 layout(buffer_reference, std430,
@@ -47,9 +47,7 @@ layout(location = 1) out uint inst_index;
 
 void main() {
 
-  vec3 verts[6] =
-      vec3[6](vec3(-0.5, -0.5, 0.0), vec3(-0.5, 0.5, 0.0), vec3(0.5, -0.5, 0.0),
-              vec3(0.5, -0.5, 0.0), vec3(-0.5, 0.5, 0.0), vec3(0.5, 0.5, 0.0));
+  Vertex vert = vertices[gl_VertexIndex];
 
   TexData tex_data = base.data[gl_InstanceIndex];
   vec2 tex_size = textureSize(tex2d_samplers[tex_data.tex_id], 0);
@@ -58,9 +56,9 @@ void main() {
   mat4 view = scene_base.scene_data[0].view;
   mat4 mvp = proj * view * tex_data.transform;
 
-  vec4 position_camera = mvp * vec4(verts[gl_VertexIndex], 1.0);
+  vec4 position_camera = mvp * vec4(vert.position, 1.0);
 
   gl_Position = position_camera;
-  uv = (verts[gl_VertexIndex].xy + vec2(0.5));
+  uv = vec2(vert.uv_x, vert.uv_y);
   inst_index = gl_InstanceIndex;
 }

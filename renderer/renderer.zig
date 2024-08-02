@@ -1,16 +1,20 @@
 const std = @import("std");
 const math = @import("math");
 const sdl_util = @import("sdl_util.zig");
+const bindless_descriptor_info = @import("bindless_descriptor_info.zig");
 const sampler_allocator = @import("allocators/sampler_allocator.zig");
 const mesh_allocator = @import("allocators/mesh_allocator.zig");
 const rta = @import("allocators/render_target_allocator.zig");
 const ta = @import("allocators/texture_allocator.zig");
-pub const c = @import("clibs.zig");
 const types = @import("types.zig");
 const camera = @import("camera.zig");
 
+const material_library = @import("material_library.zig");
+pub const c = @import("clibs.zig");
+
 const Allocator = std.mem.Allocator;
 
+const BindlessDescriptorInfo = bindless_descriptor_info.BindlessDescriptorInfo;
 const Texture = types.Texture;
 const TextureHandle = types.TextureHandle;
 const TextureFlags = types.TextureFlags;
@@ -25,6 +29,9 @@ const TextureAllocation = ta.TextureAllocation;
 const Mesh = types.Mesh;
 const MeshHandle = types.MeshHandle;
 const MeshAllocation = mesh_allocator.MeshAllocator.Allocation;
+pub const Material = material_library.Material;
+pub const MaterialHandle = material_library.MaterialHandle;
+pub const MaterialLibrary = material_library.MaterialLibrary;
 
 const Vec2 = math.Vec2;
 const Vec4 = math.Vec4;
@@ -38,8 +45,16 @@ const Camera2D = camera.Camera2D;
 const vk_format = types.vk_format;
 
 const shaders = struct {
-    const DEFAULT_TEXTURE_VS = @embedFile("renderer/spirv/default_textures.vert.spv");
-    const DEFAULT_TEXTURE_FS = @embedFile("renderer/spirv/default_fragment.frag.spv");
+    const DEFAULT_TEXTURE_VS = std.mem.bytesAsSlice(u32, @embedFile("renderer/spirv/default_textures.vert.spv"))[0..].*;
+    const DEFAULT_TEXTURE_FS = std.mem.bytesAsSlice(u32, @embedFile("renderer/spirv/default_fragment.frag.spv"))[0..].*;
+
+    const DEFAULT_MESH_VS = std.mem.bytesAsSlice(u32, @embedFile("renderer/spirv/default_mesh.vert.spv"))[0..].*;
+    const DEFAULT_MESH_FS = std.mem.bytesAsSlice(u32, @embedFile("renderer/spirv/default_mesh.frag.spv"))[0..].*;
+};
+
+const PipelineCreateInfo = struct {
+    vertex: []const u32,
+    fragment: []const u32,
 };
 
 const required_device_extensions = [_][*:0]const u8{"VK_KHR_swapchain"};
@@ -64,6 +79,7 @@ pub const Renderer = struct {
 
     swapchain: Swapchain,
 
+    bindless_descriptor_info: BindlessDescriptorInfo,
     render_states: []RenderState,
     render_list: RenderList,
     texture_allocator: TextureAllocator,
@@ -74,6 +90,7 @@ pub const Renderer = struct {
 
     default_texture_pipeline_layout: c.VkPipelineLayout,
     default_texture_pipeline: c.VkPipeline,
+    default_mesh_pipeline: c.VkPipeline,
 
     camera: Camera2D = .{},
 
@@ -111,14 +128,15 @@ pub const Renderer = struct {
 
         const mesh_alloc = mesh_allocator.MeshAllocator.init(device, allocator, vk_allocator, .{});
         const sam_allocator = sampler_allocator.SamplerAllocator.init(allocator, device.handle);
-        const texture_allocator = try TextureAllocator.init(device, allocator, vk_allocator, mesh_alloc.mesh_storage_buffer);
+        const texture_allocator = try TextureAllocator.init(allocator, vk_allocator);
 
         for (0..Renderer.FRAMES_IN_FLIGHT) |i| {
             render_states[i] = try RenderState.init(device, allocator, vk_allocator);
         }
 
-        const pipeline_layout = create_pipeline_layout(device, &texture_allocator);
+        const bdi = BindlessDescriptorInfo.init(device.handle, allocator, mesh_alloc.mesh_storage_buffer);
 
+        const pipeline_layout = create_pipeline_layout(device, &bdi);
         var inst = Renderer{
             .instance = instance,
             .allocator = allocator,
@@ -132,12 +150,28 @@ pub const Renderer = struct {
 
             .render_list = RenderList.init(allocator),
             .render_states = render_states,
+            .bindless_descriptor_info = bdi,
             .texture_allocator = texture_allocator,
             .sampler_allocator = sam_allocator,
             .mesh_allocator = mesh_alloc,
 
             .default_texture_pipeline_layout = pipeline_layout,
-            .default_texture_pipeline = try create_default_texture_graphics_pipeline(device, pipeline_layout),
+            .default_texture_pipeline = try create_graphics_pipeline(
+                device,
+                pipeline_layout,
+                .{
+                    .vertex = &shaders.DEFAULT_TEXTURE_VS,
+                    .fragment = &shaders.DEFAULT_TEXTURE_FS,
+                },
+            ),
+            .default_mesh_pipeline = try create_graphics_pipeline(
+                device,
+                pipeline_layout,
+                .{
+                    .vertex = &shaders.DEFAULT_MESH_VS,
+                    .fragment = &shaders.DEFAULT_MESH_FS,
+                },
+            ),
         };
 
         try inst.create_defaults();
@@ -152,9 +186,11 @@ pub const Renderer = struct {
 
         this.free_texture(this.white_texture);
 
+        c.vkDestroyPipeline(this.device.handle, this.default_mesh_pipeline, null);
         c.vkDestroyPipeline(this.device.handle, this.default_texture_pipeline, null);
         c.vkDestroyPipelineLayout(this.device.handle, this.default_texture_pipeline_layout, null);
 
+        this.bindless_descriptor_info.deinit(this.device.handle);
         this.mesh_allocator.deinit();
         this.texture_allocator.deinit(this.device);
         this.sampler_allocator.deinit();
@@ -252,6 +288,8 @@ pub const Renderer = struct {
             vk_check(c.vkDeviceWaitIdle(this.device.handle), "Failed to wait device idle");
             c.vmaDestroyBuffer(this.vk_allocator, staging_buffer.buffer, staging_buffer.allocation);
         }
+
+        try this.bindless_descriptor_info.add_write_texture_to_descriptor_set(allocation.texture, allocation.handle.id);
         return allocation.handle;
     }
 
@@ -316,11 +354,15 @@ pub const Renderer = struct {
         });
     }
 
+    pub fn draw_mesh(this: *Renderer, draw_info: MeshDrawInfo) !void {
+        try this.render_list.meshes.append(draw_info);
+    }
+
     pub fn render(this: *Renderer, viewport_extents: Vec2) !void {
         var render_state = &this.render_states[this.current_render_state];
         this.update_primitive_buffers(render_state, viewport_extents);
 
-        try this.texture_allocator.flush_updates(this.device);
+        try this.bindless_descriptor_info.flush_updates(this.device.handle);
 
         const width: u32 = @intFromFloat(viewport_extents.x());
         const height: u32 = @intFromFloat(viewport_extents.y());
@@ -415,30 +457,15 @@ pub const Renderer = struct {
         }, this.allocator);
         c.vkCmdBeginRendering(cmd_buf, &rendering_info);
 
-        c.vkCmdBindPipeline(cmd_buf, c.VK_PIPELINE_BIND_POINT_GRAPHICS, this.default_texture_pipeline);
         c.vkCmdBindDescriptorSets(
             cmd_buf,
             c.VK_PIPELINE_BIND_POINT_GRAPHICS,
             this.default_texture_pipeline_layout,
             0,
             1,
-            &[1]c.VkDescriptorSet{this.texture_allocator.bindless_descriptor_set},
+            &[1]c.VkDescriptorSet{this.bindless_descriptor_info.bindless_descriptor_set},
             0,
             null,
-        );
-
-        const push_constant = TextureDrawInfo.PushConstantData{
-            .tex_buffer_address = render_state.textures_buffer_address,
-            .scene_constant_address = render_state.per_frame_buffer_address,
-        };
-
-        c.vkCmdPushConstants(
-            cmd_buf,
-            this.default_texture_pipeline_layout,
-            c.VK_SHADER_STAGE_ALL,
-            0,
-            @sizeOf(TextureDrawInfo.PushConstantData),
-            &push_constant,
         );
 
         c.vkCmdSetViewport(
@@ -473,6 +500,77 @@ pub const Renderer = struct {
                     },
                 },
             },
+        );
+
+        if (this.render_list.meshes.items.len > 0) {
+            var push_constant = TextureDrawInfo.PushConstantData{
+                .tex_buffer_address = render_state.textures_buffer_address,
+                .scene_constant_address = render_state.per_frame_buffer_address,
+            };
+            c.vkCmdPushConstants(
+                cmd_buf,
+                this.default_texture_pipeline_layout,
+                c.VK_SHADER_STAGE_ALL,
+                0,
+                @sizeOf(TextureDrawInfo.PushConstantData),
+                &push_constant,
+            );
+            {
+                const pipeline = this.default_mesh_pipeline;
+                c.vkCmdBindPipeline(cmd_buf, c.VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
+            }
+            var current_material = this.render_list.meshes.items[0].material;
+            var current_mesh = this.render_list.meshes.items[0].mesh;
+            var mesh_drawcalls: u32 = 1;
+
+            for (this.render_list.meshes.items) |cmd| {
+                if (current_material.id != cmd.material.id) {
+                    current_material = cmd.material;
+                    const pipeline = this.default_mesh_pipeline;
+                    c.vkCmdBindPipeline(cmd_buf, c.VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
+                }
+
+                if (current_mesh.id != cmd.mesh.id) {
+                    if (mesh_drawcalls > 0) {
+                        const mesh = this.mesh_allocator.get(current_mesh);
+                        c.vkCmdDraw(cmd_buf, mesh.num_vertices, mesh_drawcalls, 0, 0);
+                        std.debug.print("Draw mesh {d} with material {d}", .{ current_mesh.id, current_material.id });
+                        push_constant.tex_buffer_address += @sizeOf(TextureDrawInfo.GpuData) * mesh_drawcalls;
+                        mesh_drawcalls = 1;
+                        c.vkCmdPushConstants(
+                            cmd_buf,
+                            this.default_texture_pipeline_layout,
+                            c.VK_SHADER_STAGE_ALL,
+                            0,
+                            @sizeOf(TextureDrawInfo.PushConstantData),
+                            &push_constant,
+                        );
+                    }
+
+                    current_mesh = cmd.mesh;
+                } else {
+                    mesh_drawcalls += 1;
+                }
+            }
+            if (mesh_drawcalls > 0) {
+                c.vkCmdDraw(cmd_buf, 6, mesh_drawcalls, 0, 0);
+            }
+        }
+
+        c.vkCmdBindPipeline(cmd_buf, c.VK_PIPELINE_BIND_POINT_GRAPHICS, this.default_texture_pipeline);
+        const texture_info_offset: usize = @intCast(this.render_list.meshes.items.len * @sizeOf(TextureDrawInfo.GpuData));
+        const push_constant = TextureDrawInfo.PushConstantData{
+            .tex_buffer_address = render_state.textures_buffer_address + texture_info_offset,
+            .scene_constant_address = render_state.per_frame_buffer_address,
+        };
+
+        c.vkCmdPushConstants(
+            cmd_buf,
+            this.default_texture_pipeline_layout,
+            c.VK_SHADER_STAGE_ALL,
+            0,
+            @sizeOf(TextureDrawInfo.PushConstantData),
+            &push_constant,
         );
 
         const num_textures: u32 = @intCast(this.render_list.textures.items.len);
@@ -598,6 +696,10 @@ pub const Renderer = struct {
 
         return a.z_index < b.z_index;
     }
+    fn sort_mesh_draw_info(ctx: void, a: MeshDrawInfo, b: MeshDrawInfo) bool {
+        _ = ctx;
+        return a.material.id < b.material.id and a.mesh.id < b.mesh.id;
+    }
 
     fn update_primitive_buffers(
         this: *const Renderer,
@@ -609,10 +711,24 @@ pub const Renderer = struct {
             c.vmaGetAllocationInfo(this.vk_allocator, render_state.textures_mem_allocation, &buffer_alloc_info);
             const data: [*]TextureDrawInfo.GpuData = @ptrCast(@alignCast(buffer_alloc_info.pMappedData.?));
 
+            std.mem.sortUnstable(MeshDrawInfo, this.render_list.meshes.items, {}, sort_mesh_draw_info);
             std.mem.sortUnstable(TextureDrawInfo, this.render_list.textures.items, {}, sort_texture_draw_info);
-            for (this.render_list.textures.items, 0..) |tex, i| {
+            var i: u32 = 0;
+
+            for (this.render_list.meshes.items) |mesh| {
+                const gpu_info = TextureDrawInfo.GpuData{
+                    .transform_matrix = mesh.transform,
+                    .offset_extent_px = Vec4.ZERO,
+                    .color = Vec4.ZERO,
+                    .tex_id = 0,
+                };
+                data[i] = gpu_info;
+                i += 1;
+            }
+            for (this.render_list.textures.items) |tex| {
                 const gpu_info = TextureDrawInfo.GpuData.from(tex);
                 data[i] = gpu_info;
+                i += 1;
             }
         }
         {
@@ -991,7 +1107,7 @@ pub const Renderer = struct {
         } });
     }
 
-    fn create_pipeline_layout(device: VkDevice, tex_allocator: *const TextureAllocator) c.VkPipelineLayout {
+    fn create_pipeline_layout(device: VkDevice, bdi: *const BindlessDescriptorInfo) c.VkPipelineLayout {
         const push_constant_range = c.VkPushConstantRange{
             .offset = 0,
             .size = @intCast(@sizeOf(TextureDrawInfo.PushConstantData)),
@@ -1001,7 +1117,7 @@ pub const Renderer = struct {
             .sType = c.VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
             .pNext = null,
             .setLayoutCount = 1,
-            .pSetLayouts = &[_]c.VkDescriptorSetLayout{tex_allocator.bindless_descriptor_set_layout},
+            .pSetLayouts = &[_]c.VkDescriptorSetLayout{bdi.bindless_descriptor_set_layout},
             .pushConstantRangeCount = 1,
             .pPushConstantRanges = &[_]c.VkPushConstantRange{push_constant_range},
         };
@@ -1011,7 +1127,7 @@ pub const Renderer = struct {
         return layout;
     }
 
-    fn create_default_texture_graphics_pipeline(device: VkDevice, pipeline_layout: c.VkPipelineLayout) !c.VkPipeline {
+    fn create_graphics_pipeline(device: VkDevice, pipeline_layout: c.VkPipelineLayout, pipeline_info: PipelineCreateInfo) !c.VkPipeline {
         var vertex_module: c.VkShaderModule = undefined;
         var fragment_module: c.VkShaderModule = undefined;
 
@@ -1019,15 +1135,15 @@ pub const Renderer = struct {
         const vert_module_create_info: c.VkShaderModuleCreateInfo = .{
             .sType = c.VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
             .pNext = null,
-            .codeSize = shaders.DEFAULT_TEXTURE_VS.len,
-            .pCode = @ptrCast(@alignCast(shaders.DEFAULT_TEXTURE_VS.ptr)),
+            .codeSize = pipeline_info.vertex.len * 4,
+            .pCode = pipeline_info.vertex.ptr,
             .flags = 0
         };
         const frag_module_create_info: c.VkShaderModuleCreateInfo = .{
             .sType = c.VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
             .pNext = null,
-            .codeSize = shaders.DEFAULT_TEXTURE_FS.len,
-            .pCode = @ptrCast(@alignCast(shaders.DEFAULT_TEXTURE_FS.ptr)),
+            .codeSize = pipeline_info.fragment.len * 4,
+            .pCode = pipeline_info.fragment.ptr,
             .flags = 0
         };
         // zig fmt: on
@@ -1522,21 +1638,32 @@ pub const RectDrawInfo = struct {
     z_index: i32 = 0,
 };
 
+pub const MeshDrawInfo = struct {
+    mesh: MeshHandle,
+    material: MaterialHandle,
+    transform: Mat4,
+};
+
 const TextureDrawList = std.ArrayList(TextureDrawInfo);
+const MeshDrawList = std.ArrayList(MeshDrawInfo);
 const RenderList = struct {
+    meshes: MeshDrawList,
     textures: TextureDrawList,
 
     fn init(allocator: Allocator) RenderList {
         return .{
+            .meshes = MeshDrawList.init(allocator),
             .textures = TextureDrawList.init(allocator),
         };
     }
 
     fn clear(this: *RenderList) void {
+        this.meshes.clearRetainingCapacity();
         this.textures.clearRetainingCapacity();
     }
 
     fn deinit(this: *RenderList) void {
+        this.meshes.deinit();
         this.textures.deinit();
     }
 };

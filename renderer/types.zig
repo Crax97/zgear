@@ -11,7 +11,7 @@ pub fn Handle(comptime T: type) type {
         const NULL = std.math.maxInt(u32);
         id: u32 = NULL,
 
-        fn is_null(this: @This()) bool {
+        pub fn is_null(this: @This()) bool {
             return this.id == NULL;
         }
     };
@@ -56,6 +56,7 @@ pub const Mesh = struct {
     };
     span: Span,
     allocation: c.VmaVirtualAllocation,
+    num_vertices: u32,
 };
 
 pub const Filter = enum {

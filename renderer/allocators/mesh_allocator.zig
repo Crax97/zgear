@@ -118,6 +118,7 @@ pub const MeshAllocator = struct {
                     .offset = offset,
                     .size = alloc_info.size,
                 },
+                .num_vertices = @intCast(info.vertices.len),
             };
             return .{
                 .mesh = mesh.*.?,
@@ -129,6 +130,11 @@ pub const MeshAllocator = struct {
 
             return error.MeshAllocationFailed;
         }
+    }
+
+    pub fn get(this: *MeshAllocator, mesh_handle: MeshHandle) Mesh {
+        std.debug.assert(!mesh_handle.is_null());
+        return this.all_meshes.items[mesh_handle.id].?;
     }
 
     pub fn free_mesh(this: *MeshAllocator, mesh_handle: MeshHandle) void {

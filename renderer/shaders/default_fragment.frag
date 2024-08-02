@@ -4,6 +4,14 @@
 #extension GL_EXT_buffer_reference2 : require
 #extension GL_EXT_shader_explicit_arithmetic_types : require
 
+struct Vertex {
+  vec3 position;
+  float uv_x;
+  vec3 normal;
+  float uv_y;
+  vec3 vertex_color;
+};
+
 struct TexData {
   mat4 transform;
   vec4 offset_extent_px;
@@ -16,7 +24,8 @@ struct SceneData {
   mat4 view;
 };
 
-layout(set = 0, binding = 0) uniform sampler2D[] tex2d_samplers;
+layout(set = 0, binding = 0) uniform Geometry { Vertex vertices[]; };
+layout(set = 0, binding = 6) uniform sampler2D[] tex2d_samplers;
 
 layout(buffer_reference, std430,
        buffer_reference_align = 16) readonly buffer TextureDrawInfoBase {
