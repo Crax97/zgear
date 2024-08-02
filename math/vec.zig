@@ -107,7 +107,7 @@ pub fn vec_t(comptime T: type, comptime N: comptime_int) type {
         }
 
         pub fn magnitude(this: *const This) F {
-            return @sqrt(this.magnitude_squared(this));
+            return @sqrt(this.magnitude_squared());
         }
 
         pub fn add(this: *const This, other: This) This {
@@ -149,7 +149,7 @@ pub fn vec_t(comptime T: type, comptime N: comptime_int) type {
 
         pub fn normalize(this: *const This) This {
             const len = this.magnitude();
-            return this.scale(len);
+            return this.scale(1.0 / len);
         }
 
         pub inline fn dot(this: *const This, other: This) F {

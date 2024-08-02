@@ -74,7 +74,7 @@ pub fn vec4(x: f32, y: f32, z: f32, w: f32) Vec4 {
     return Vec4.new(.{ x, y, z, w });
 }
 
-pub fn cross(this: *Vec3, other: Vec3) Vec3 {
+pub fn cross(this: *const Vec3, other: Vec3) Vec3 {
     const c1: @Vector(3, f32) = .{ this.data[1], this.data[2], this.data[0] };
     const c2: @Vector(3, f32) = .{ other.data[2], other.data[0], other.data[1] };
     const a = c1 * c2;
@@ -187,6 +187,23 @@ pub fn perspective_t(comptime T: type, aspect: T, fovy_degrees: T, near: T, far:
         0.0,          -1.0 / tan, 0.0,                 0.0,
         0.0,          0.0,        -far / (near - far), (far * near) / (near - far),
         0.0,          0.0,        1,                   0.0,
+    });
+}
+
+pub fn look_at(eye: Vec3, target: Vec3, up: Vec3) Mat4 {
+    return look_at_t(f32, eye, target, up);
+}
+
+pub fn look_at_t(comptime T: type, eye: vec.vec_t(T, 3), target: vec.vec_t(T, 3), up: vec.vec_t(T, 3)) mat.mat_t(T, 4) {
+    const d = target.sub(eye).normalize();
+    const r = cross(&d, up).normalize();
+    const u = cross(&d, r).normalize();
+
+    return mat.mat_t(T, 4).new_cols(.{
+        r.x(), u.x(), d.x(), 0.0,
+        r.y(), u.y(), d.y(), 0.0,
+        r.z(), u.z(), d.z(), 0.0,
+        0.0,   0.0,   0.0,   1.0,
     });
 }
 
@@ -330,6 +347,11 @@ test "Matrix inverse" {
     }
 
     try std.testing.expect(std.math.approxEqAbs(f32, random_mat.det(), 1536.0, 0.05));
+}
+
+test "Lookat" {
+    const m = look_at(vec3(0.0, 10.0, 0.0), vec3(0.0, 10.0, 5.0), vec3(0.0, 1.0, 0.0));
+    try std.testing.expect(m.row(2).eql_approx(vec4(0.0, 0.0, 1.0, 0.0), 0.05));
 }
 
 fn print_mat(comptime N: comptime_int, m: mat.mat_t(f32, N)) void {
