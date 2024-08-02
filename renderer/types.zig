@@ -2,6 +2,7 @@ const std = @import("std");
 const math = @import("math");
 const c = @import("clibs.zig");
 
+const Vec4 = math.Vec4;
 const Vec3 = math.Vec3;
 const Vec2 = math.Vec2;
 
@@ -44,11 +45,9 @@ pub const Texture = struct {
 };
 
 pub const Vertex = extern struct {
-    position: Vec3,
-    uv_x: f32,
-    normal: Vec3,
-    uv_y: f32,
-    vertex_color: Vec3,
+    position_uvx: Vec4,
+    normal_uvy: Vec4,
+    vertex_color: Vec4,
 };
 pub const Mesh = struct {
     pub const CreateInfo = struct {

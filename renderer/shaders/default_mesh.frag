@@ -44,6 +44,11 @@ layout(push_constant) uniform TexDrawConstants {
 
 layout(location = 0) in vec2 uv;
 layout(location = 1) flat in uint inst_index;
+layout(location = 2) in vec4 vertex_color;
+layout(location = 3) in vec3 normal;
+layout(location = 4) in vec3 position;
+layout(location = 5) in vec3 world_position;
+
 layout(location = 0) out vec4 color;
 
-void main() { color = vec4(0.33, 0.44, 0.55, 1.0); }
+void main() { color = vertex_color; }

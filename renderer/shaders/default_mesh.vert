@@ -5,11 +5,9 @@
 #extension GL_EXT_shader_explicit_arithmetic_types : require
 
 struct Vertex {
-  vec3 position;
-  float uv_x;
-  vec3 normal;
-  float uv_y;
-  vec3 vertex_color;
+  vec4 pos_uvx;
+  vec4 norm_uvy;
+  vec4 vertex_color;
 };
 
 struct TexData {
@@ -43,8 +41,11 @@ layout(push_constant) uniform TexDrawConstants {
 };
 
 layout(location = 0) out vec2 uv;
-layout(location = 1) out uint inst_index;
-
+layout(location = 1) flat out uint inst_index;
+layout(location = 2) out vec4 vertex_color;
+layout(location = 3) out vec3 normal;
+layout(location = 4) out vec3 vert_position;
+layout(location = 5) out vec3 world_position;
 void main() {
 
   Vertex vert = vertices[gl_VertexIndex];
@@ -54,11 +55,17 @@ void main() {
 
   mat4 proj = scene_base.scene_data[0].projection;
   mat4 view = scene_base.scene_data[0].view;
-  mat4 mvp = proj * view * tex_data.transform;
+  mat4 vp = view * tex_data.transform;
 
-  vec4 position_camera = mvp * vec4(vert.position, 1.0);
+  vec4 position_world = vp * vec4(vert.pos_uvx.xyz, 1.0);
+
+  vec4 position_camera = proj * position_world;
 
   gl_Position = position_camera;
-  uv = vec2(vert.uv_x, vert.uv_y);
+  uv = vec2(vert.pos_uvx.w, vert.norm_uvy.w);
   inst_index = gl_InstanceIndex;
+  vertex_color = vert.vertex_color;
+  normal = vert.norm_uvy.xyz;
+  vert_position = vert.pos_uvx.xyz;
+  world_position = position_world.xyz;
 }
