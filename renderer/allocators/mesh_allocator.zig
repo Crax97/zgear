@@ -20,7 +20,9 @@ pub const MeshAllocator = struct {
     allocator: Allocator,
     vk_allocator: c.VmaAllocator,
     mesh_storage_buffer: c.VkBuffer,
+    mesh_indices_buffer: c.VkBuffer,
     mesh_storage_allocation: c.VmaAllocation,
+    mesh_indices_allocation: c.VmaAllocation,
     mesh_storage_address: c.VkDeviceAddress,
     mesh_buffer_block: c.VmaVirtualBlock,
     unused_handles: std.ArrayList(MeshHandle),
@@ -28,7 +30,9 @@ pub const MeshAllocator = struct {
 
     pub fn init(device: renderer.VkDevice, allocator: Allocator, vk_allocator: c.VmaAllocator, settings: Settings) MeshAllocator {
         var mesh_storage_buffer: c.VkBuffer = undefined;
+        var mesh_indices_buffer: c.VkBuffer = undefined;
         var mesh_storage_allocation: c.VmaAllocation = undefined;
+        var mesh_indices_allocation: c.VmaAllocation = undefined;
         const buf_create_info = c.VkBufferCreateInfo{
             .sType = c.VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
             .pNext = null,
@@ -56,6 +60,18 @@ pub const MeshAllocator = struct {
             "Failed to allocate mesh data buffer",
         );
 
+        vk_check(
+            c.vmaCreateBuffer(
+                vk_allocator,
+                &buf_create_info,
+                &alloc_info,
+                &mesh_indices_buffer,
+                &mesh_indices_allocation,
+                null,
+            ),
+            "Failed to allocate mesh data buffer",
+        );
+
         const mesh_storage_address = c.vkGetBufferDeviceAddress(device.handle, &c.VkBufferDeviceAddressInfo{
             .sType = c.VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
             .pNext = null,
@@ -75,6 +91,8 @@ pub const MeshAllocator = struct {
             .vk_allocator = vk_allocator,
             .mesh_storage_buffer = mesh_storage_buffer,
             .mesh_storage_allocation = mesh_storage_allocation,
+            .mesh_indices_buffer = mesh_indices_buffer,
+            .mesh_indices_allocation = mesh_indices_allocation,
             .mesh_storage_address = mesh_storage_address,
             .mesh_buffer_block = mesh_buffer_block,
             .unused_handles = std.ArrayList(MeshHandle).init(allocator),
@@ -86,6 +104,7 @@ pub const MeshAllocator = struct {
         this.unused_handles.deinit();
         this.all_meshes.deinit();
         c.vmaDestroyBuffer(this.vk_allocator, this.mesh_storage_buffer, this.mesh_storage_allocation);
+        c.vmaDestroyBuffer(this.vk_allocator, this.mesh_indices_buffer, this.mesh_indices_allocation);
         c.vmaDestroyVirtualBlock(this.mesh_buffer_block);
     }
 

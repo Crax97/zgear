@@ -134,7 +134,7 @@ pub const Renderer = struct {
             render_states[i] = try RenderState.init(device, allocator, vk_allocator);
         }
 
-        const bdi = BindlessDescriptorInfo.init(device.handle, allocator, mesh_alloc.mesh_storage_buffer);
+        const bdi = BindlessDescriptorInfo.init(device.handle, allocator, mesh_alloc.mesh_storage_buffer, mesh_alloc.mesh_indices_buffer);
 
         const pipeline_layout = create_pipeline_layout(device, &bdi);
         var inst = Renderer{
@@ -300,29 +300,52 @@ pub const Renderer = struct {
     pub fn alloc_mesh(this: *Renderer, info: Mesh.CreateInfo) !MeshHandle {
         const allocation = try this.mesh_allocator.alloc_mesh(&info);
         const mesh_size_bytes = @sizeOf(types.Vertex) * info.vertices.len;
+        const indices_size_bytes = @sizeOf(u32) * info.indices.len;
         std.debug.assert(mesh_size_bytes <= allocation.mesh.span.size);
 
-        const staging_buffer = try this.create_staging_buffer(mesh_size_bytes);
-        var alloc_info = std.mem.zeroes(c.VmaAllocationInfo);
-        c.vmaGetAllocationInfo(this.vk_allocator, staging_buffer.allocation, &alloc_info);
-        const ptr: [*]u8 = @ptrCast(alloc_info.pMappedData);
-        const bytes = std.mem.sliceAsBytes(info.vertices);
-        @memcpy(ptr, bytes);
-
         const cmd_buf = try this.allocate_oneshot_command_buffer();
-        const regions = &[_]c.VkBufferCopy{
-            c.VkBufferCopy{
-                .srcOffset = 0,
-                .dstOffset = allocation.mesh.span.offset,
-                .size = allocation.mesh.span.size,
-            },
-        };
-        c.vkCmdCopyBuffer(cmd_buf, staging_buffer.buffer, this.mesh_allocator.mesh_storage_buffer, 1, regions);
+        const staging_buffer_verts = try this.create_staging_buffer(mesh_size_bytes);
+        const staging_buffer_indices = try this.create_staging_buffer(indices_size_bytes);
+
+        {
+            var alloc_info = std.mem.zeroes(c.VmaAllocationInfo);
+            c.vmaGetAllocationInfo(this.vk_allocator, staging_buffer_verts.allocation, &alloc_info);
+            const ptr: [*]u8 = @ptrCast(alloc_info.pMappedData);
+            const bytes = std.mem.sliceAsBytes(info.vertices);
+            @memcpy(ptr, bytes);
+
+            const regions = &[_]c.VkBufferCopy{
+                c.VkBufferCopy{
+                    .srcOffset = 0,
+                    .dstOffset = allocation.mesh.span.offset,
+                    .size = @intCast(mesh_size_bytes),
+                },
+            };
+            c.vkCmdCopyBuffer(cmd_buf, staging_buffer_verts.buffer, this.mesh_allocator.mesh_storage_buffer, 1, regions);
+        }
+
+        {
+            var alloc_info = std.mem.zeroes(c.VmaAllocationInfo);
+            c.vmaGetAllocationInfo(this.vk_allocator, staging_buffer_indices.allocation, &alloc_info);
+            const ptr: [*]u8 = @ptrCast(alloc_info.pMappedData);
+            const bytes = std.mem.sliceAsBytes(info.indices);
+            @memcpy(ptr, bytes);
+
+            const regions = &[_]c.VkBufferCopy{
+                c.VkBufferCopy{
+                    .srcOffset = 0,
+                    .dstOffset = allocation.mesh.span.offset,
+                    .size = @intCast(indices_size_bytes),
+                },
+            };
+            c.vkCmdCopyBuffer(cmd_buf, staging_buffer_indices.buffer, this.mesh_allocator.mesh_indices_buffer, 1, regions);
+        }
 
         // it will be resetted by resetCommandPool
         this.submit_oneshot_command_buffer(false, cmd_buf);
         vk_check(c.vkDeviceWaitIdle(this.device.handle), "Failed to wait device idle");
-        c.vmaDestroyBuffer(this.vk_allocator, staging_buffer.buffer, staging_buffer.allocation);
+        c.vmaDestroyBuffer(this.vk_allocator, staging_buffer_verts.buffer, staging_buffer_verts.allocation);
+        c.vmaDestroyBuffer(this.vk_allocator, staging_buffer_indices.buffer, staging_buffer_indices.allocation);
 
         return allocation.handle;
     }
@@ -506,6 +529,7 @@ pub const Renderer = struct {
             var push_constant = TextureDrawInfo.PushConstantData{
                 .tex_buffer_address = render_state.textures_buffer_address,
                 .scene_constant_address = render_state.per_frame_buffer_address,
+                .scene_buffer_offset = 0,
             };
             c.vkCmdPushConstants(
                 cmd_buf,
@@ -535,6 +559,8 @@ pub const Renderer = struct {
                         const mesh = this.mesh_allocator.get(current_mesh);
                         c.vkCmdDraw(cmd_buf, mesh.num_vertices, mesh_drawcalls, 0, 0);
                         push_constant.tex_buffer_address += @sizeOf(TextureDrawInfo.GpuData) * mesh_drawcalls;
+                        const num_verts: usize = @intCast(mesh.num_vertices);
+                        push_constant.scene_buffer_offset += @sizeOf(types.Vertex) * num_verts;
                         mesh_drawcalls = 1;
                         c.vkCmdPushConstants(
                             cmd_buf,
@@ -561,6 +587,7 @@ pub const Renderer = struct {
         const push_constant = TextureDrawInfo.PushConstantData{
             .tex_buffer_address = render_state.textures_buffer_address + texture_info_offset,
             .scene_constant_address = render_state.per_frame_buffer_address,
+            .scene_buffer_offset = 0,
         };
 
         c.vkCmdPushConstants(
@@ -1621,6 +1648,7 @@ pub const TextureDrawInfo = struct {
     const PushConstantData = packed struct {
         tex_buffer_address: c.VkDeviceAddress,
         scene_constant_address: c.VkDeviceAddress,
+        scene_buffer_offset: usize,
     };
 
     texture: TextureHandle,

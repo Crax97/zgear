@@ -52,6 +52,7 @@ pub const Vertex = extern struct {
 pub const Mesh = struct {
     pub const CreateInfo = struct {
         vertices: []const Vertex,
+        indices: []const u32,
     };
     span: Span,
     allocation: c.VmaVirtualAllocation,

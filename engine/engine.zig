@@ -114,9 +114,10 @@ pub const Engine = struct {
         const game_type_info = @typeInfo(@TypeOf(game_ptr));
         if (game_type_info != .Pointer) @compileError("game_ptr must be a pointer to struct!");
         var game_inst = Game.make(game_type_info.Pointer.child, game_ptr);
-        try game_inst.init(game_inst.target, this);
 
         engine_instance_ptr = this;
+
+        try game_inst.init(game_inst.target, this);
 
         try this.world.begin();
         while (this.running) {

@@ -17,6 +17,7 @@ pub const BindlessDescriptorInfo = struct {
 
     const num_descriptors: u32 = 16536;
     const geometry_buffer_binding: u32 = 0;
+    const indices_buffer_binding: u32 = 1;
     const bindless_textures_binding: u32 = 6;
 
     bindless_descriptor_set: c.VkDescriptorSet,
@@ -26,13 +27,20 @@ pub const BindlessDescriptorInfo = struct {
 
     updates: std.ArrayList(BindlessTextureUpdate),
 
-    pub fn init(device: c.VkDevice, allocator: Allocator, global_geometry_buffer: c.VkBuffer) BindlessDescriptorInfo {
+    pub fn init(device: c.VkDevice, allocator: Allocator, global_geometry_buffer: c.VkBuffer, global_indices_buffer: c.VkBuffer) BindlessDescriptorInfo {
         var layout: c.VkDescriptorSetLayout = undefined;
         const bindings = [_]c.VkDescriptorSetLayoutBinding{
             c.VkDescriptorSetLayoutBinding{
                 .descriptorType = c.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
                 .descriptorCount = 1,
                 .binding = geometry_buffer_binding,
+                .stageFlags = c.VK_SHADER_STAGE_ALL,
+                .pImmutableSamplers = null,
+            },
+            c.VkDescriptorSetLayoutBinding{
+                .descriptorType = c.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                .descriptorCount = 1,
+                .binding = indices_buffer_binding,
                 .stageFlags = c.VK_SHADER_STAGE_ALL,
                 .pImmutableSamplers = null,
             },
@@ -45,14 +53,15 @@ pub const BindlessDescriptorInfo = struct {
             },
         };
 
-        const bindless_flags: [2]u32 = [_]u32{
+        const bindless_flags: [3]u32 = [_]u32{
+            0,
             0,
             @intCast(c.VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT | c.VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT),
         };
         const bindless_info = c.VkDescriptorSetLayoutBindingFlagsCreateInfoEXT{
             .sType = c.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO,
             .pNext = null,
-            .bindingCount = 2,
+            .bindingCount = 3,
             .pBindingFlags = &bindless_flags,
         };
 
@@ -69,7 +78,7 @@ pub const BindlessDescriptorInfo = struct {
         const pool_sizes = [_]c.VkDescriptorPoolSize{
             c.VkDescriptorPoolSize{
                 .type = c.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-                .descriptorCount = 1,
+                .descriptorCount = 2,
             },
             c.VkDescriptorPoolSize{
                 .type = c.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
@@ -102,8 +111,14 @@ pub const BindlessDescriptorInfo = struct {
         };
         var descriptor_set: c.VkDescriptorSet = null;
         vk_check(c.vkAllocateDescriptorSets(device, &alloc_info, &descriptor_set), "Failed to allocate bindless descriptor set");
-        const buf_info = c.VkDescriptorBufferInfo{
+        const geom_buf_info = c.VkDescriptorBufferInfo{
             .buffer = global_geometry_buffer,
+            .offset = 0,
+            .range = c.VK_WHOLE_SIZE,
+        };
+
+        const ind_buf_info = c.VkDescriptorBufferInfo{
+            .buffer = global_indices_buffer,
             .offset = 0,
             .range = c.VK_WHOLE_SIZE,
         };
@@ -116,14 +131,26 @@ pub const BindlessDescriptorInfo = struct {
                 .dstSet = descriptor_set,
                 .dstBinding = geometry_buffer_binding,
                 .pTexelBufferView = null,
-                .pBufferInfo = &buf_info,
+                .pBufferInfo = &geom_buf_info,
+                .pImageInfo = null,
+                .descriptorCount = 1,
+                .descriptorType = c.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+            },
+            c.VkWriteDescriptorSet{
+                .sType = c.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+                .pNext = null,
+                .dstArrayElement = 0,
+                .dstSet = descriptor_set,
+                .dstBinding = indices_buffer_binding,
+                .pTexelBufferView = null,
+                .pBufferInfo = &ind_buf_info,
                 .pImageInfo = null,
                 .descriptorCount = 1,
                 .descriptorType = c.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
             },
         };
 
-        c.vkUpdateDescriptorSets(device, @intCast(1), &writes, 0, null);
+        c.vkUpdateDescriptorSets(device, @intCast(writes.len), &writes, 0, null);
 
         return .{
             .bindless_descriptor_set = descriptor_set,

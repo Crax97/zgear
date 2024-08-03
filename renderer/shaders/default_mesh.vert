@@ -23,6 +23,7 @@ struct SceneData {
 };
 
 layout(set = 0, binding = 0) readonly buffer Geometry { Vertex vertices[]; };
+layout(set = 0, binding = 1) readonly buffer Indices { uint indices[]; };
 layout(set = 0, binding = 6) uniform sampler2D[] tex2d_samplers;
 
 layout(buffer_reference, std430,
@@ -38,6 +39,7 @@ layout(buffer_reference, std430,
 layout(push_constant) uniform TexDrawConstants {
   TextureDrawInfoBase base;
   SceneDataBase scene_base;
+  uint geometry_offset;
 };
 
 layout(location = 0) out vec2 uv;
@@ -48,7 +50,8 @@ layout(location = 4) out vec3 vert_position;
 layout(location = 5) out vec3 world_position;
 void main() {
 
-  Vertex vert = vertices[gl_VertexIndex];
+  uint idx = indices[geometry_offset + gl_VertexIndex];
+  Vertex vert = vertices[idx];
 
   TexData tex_data = base.data[gl_InstanceIndex];
   vec2 tex_size = textureSize(tex2d_samplers[tex_data.tex_id], 0);
