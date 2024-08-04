@@ -301,7 +301,8 @@ pub const Renderer = struct {
         const allocation = try this.mesh_allocator.alloc_mesh(&info);
         const mesh_size_bytes = @sizeOf(types.Vertex) * info.vertices.len;
         const indices_size_bytes = @sizeOf(u32) * info.indices.len;
-        std.debug.assert(mesh_size_bytes <= allocation.mesh.span.size);
+        std.debug.assert(mesh_size_bytes <= allocation.mesh.geometry_span.size);
+        std.debug.assert(indices_size_bytes <= allocation.mesh.index_span.size);
 
         const cmd_buf = try this.allocate_oneshot_command_buffer();
         const staging_buffer_verts = try this.create_staging_buffer(mesh_size_bytes);
@@ -317,7 +318,7 @@ pub const Renderer = struct {
             const regions = &[_]c.VkBufferCopy{
                 c.VkBufferCopy{
                     .srcOffset = 0,
-                    .dstOffset = allocation.mesh.span.offset,
+                    .dstOffset = allocation.mesh.geometry_span.offset,
                     .size = @intCast(mesh_size_bytes),
                 },
             };
@@ -334,7 +335,7 @@ pub const Renderer = struct {
             const regions = &[_]c.VkBufferCopy{
                 c.VkBufferCopy{
                     .srcOffset = 0,
-                    .dstOffset = allocation.mesh.span.offset,
+                    .dstOffset = allocation.mesh.index_span.offset,
                     .size = @intCast(indices_size_bytes),
                 },
             };
@@ -530,6 +531,7 @@ pub const Renderer = struct {
                 .tex_buffer_address = render_state.textures_buffer_address,
                 .scene_constant_address = render_state.per_frame_buffer_address,
                 .scene_buffer_offset = 0,
+                .index_buffer_offset = 0,
             };
             c.vkCmdPushConstants(
                 cmd_buf,
@@ -556,20 +558,29 @@ pub const Renderer = struct {
 
                 if (current_mesh.id != cmd.mesh.id) {
                     if (mesh_drawcalls > 0) {
-                        const mesh = this.mesh_allocator.get(current_mesh);
-                        c.vkCmdDraw(cmd_buf, mesh.num_vertices, mesh_drawcalls, 0, 0);
-                        push_constant.tex_buffer_address += @sizeOf(TextureDrawInfo.GpuData) * mesh_drawcalls;
-                        const num_verts: usize = @intCast(mesh.num_vertices);
-                        push_constant.scene_buffer_offset += @sizeOf(types.Vertex) * num_verts;
-                        mesh_drawcalls = 1;
-                        c.vkCmdPushConstants(
-                            cmd_buf,
-                            this.default_texture_pipeline_layout,
-                            c.VK_SHADER_STAGE_ALL,
-                            0,
-                            @sizeOf(TextureDrawInfo.PushConstantData),
-                            &push_constant,
-                        );
+                        // Draw current mesh
+                        {
+                            const mesh = this.mesh_allocator.get(current_mesh);
+                            c.vkCmdDraw(cmd_buf, mesh.num_vertices, mesh_drawcalls, 0, 0);
+                        }
+
+                        // "Bind" next mesh
+                        {
+                            const mesh = this.mesh_allocator.get(cmd.mesh);
+                            push_constant.tex_buffer_address += @sizeOf(TextureDrawInfo.GpuData) * mesh_drawcalls;
+                            // std.debug.print("alloc mesh geo off {d} ind {d}\n", .{ mesh.geometry_span.offset, mesh.index_span.offset });
+                            push_constant.scene_buffer_offset = @intCast(mesh.geometry_span.value_offset);
+                            push_constant.index_buffer_offset = @intCast(mesh.index_span.value_offset);
+                            mesh_drawcalls = 1;
+                            c.vkCmdPushConstants(
+                                cmd_buf,
+                                this.default_texture_pipeline_layout,
+                                c.VK_SHADER_STAGE_ALL,
+                                0,
+                                @sizeOf(TextureDrawInfo.PushConstantData),
+                                &push_constant,
+                            );
+                        }
                     }
 
                     current_mesh = cmd.mesh;
@@ -578,29 +589,33 @@ pub const Renderer = struct {
                 }
             }
             if (mesh_drawcalls > 0) {
-                c.vkCmdDraw(cmd_buf, 6, mesh_drawcalls, 0, 0);
+                const mesh = this.mesh_allocator.get(current_mesh);
+                c.vkCmdDraw(cmd_buf, mesh.num_vertices, mesh_drawcalls, 0, 0);
             }
         }
 
-        c.vkCmdBindPipeline(cmd_buf, c.VK_PIPELINE_BIND_POINT_GRAPHICS, this.default_texture_pipeline);
-        const texture_info_offset: usize = @intCast(this.render_list.meshes.items.len * @sizeOf(TextureDrawInfo.GpuData));
-        const push_constant = TextureDrawInfo.PushConstantData{
-            .tex_buffer_address = render_state.textures_buffer_address + texture_info_offset,
-            .scene_constant_address = render_state.per_frame_buffer_address,
-            .scene_buffer_offset = 0,
-        };
-
-        c.vkCmdPushConstants(
-            cmd_buf,
-            this.default_texture_pipeline_layout,
-            c.VK_SHADER_STAGE_ALL,
-            0,
-            @sizeOf(TextureDrawInfo.PushConstantData),
-            &push_constant,
-        );
-
         const num_textures: u32 = @intCast(this.render_list.textures.items.len);
-        c.vkCmdDraw(cmd_buf, 6, num_textures, 0, 0);
+        if (num_textures > 0) {
+            c.vkCmdBindPipeline(cmd_buf, c.VK_PIPELINE_BIND_POINT_GRAPHICS, this.default_texture_pipeline);
+            const texture_info_offset: usize = @intCast(this.render_list.meshes.items.len * @sizeOf(TextureDrawInfo.GpuData));
+            const push_constant = TextureDrawInfo.PushConstantData{
+                .tex_buffer_address = render_state.textures_buffer_address + texture_info_offset,
+                .scene_constant_address = render_state.per_frame_buffer_address,
+                .scene_buffer_offset = 0,
+                .index_buffer_offset = 0,
+            };
+
+            c.vkCmdPushConstants(
+                cmd_buf,
+                this.default_texture_pipeline_layout,
+                c.VK_SHADER_STAGE_ALL,
+                0,
+                @sizeOf(TextureDrawInfo.PushConstantData),
+                &push_constant,
+            );
+            c.vkCmdDraw(cmd_buf, 6, num_textures, 0, 0);
+        }
+
         c.vkCmdEndRendering(cmd_buf);
 
         const final_transitions = [2]ImageTransition{
@@ -1648,7 +1663,8 @@ pub const TextureDrawInfo = struct {
     const PushConstantData = packed struct {
         tex_buffer_address: c.VkDeviceAddress,
         scene_constant_address: c.VkDeviceAddress,
-        scene_buffer_offset: usize,
+        scene_buffer_offset: u32,
+        index_buffer_offset: u32,
     };
 
     texture: TextureHandle,

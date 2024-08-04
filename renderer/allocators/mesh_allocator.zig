@@ -25,6 +25,7 @@ pub const MeshAllocator = struct {
     mesh_indices_allocation: c.VmaAllocation,
     mesh_storage_address: c.VkDeviceAddress,
     mesh_buffer_block: c.VmaVirtualBlock,
+    index_buffer_block: c.VmaVirtualBlock,
     unused_handles: std.ArrayList(MeshHandle),
     all_meshes: Meshes,
 
@@ -85,6 +86,13 @@ pub const MeshAllocator = struct {
             .pAllocationCallbacks = null,
         }, &mesh_buffer_block), "Failed to create mesh virtual memory block");
 
+        var index_buffer_block: c.VmaVirtualBlock = undefined;
+        vk_check(c.vmaCreateVirtualBlock(&c.VmaVirtualBlockCreateInfo{
+            .size = @intCast(settings.buffer_size),
+            .flags = 0,
+            .pAllocationCallbacks = null,
+        }, &index_buffer_block), "Failed to create index virtual memory block");
+
         return .{
             .device = device.handle,
             .allocator = allocator,
@@ -95,6 +103,7 @@ pub const MeshAllocator = struct {
             .mesh_indices_allocation = mesh_indices_allocation,
             .mesh_storage_address = mesh_storage_address,
             .mesh_buffer_block = mesh_buffer_block,
+            .index_buffer_block = index_buffer_block,
             .unused_handles = std.ArrayList(MeshHandle).init(allocator),
             .all_meshes = Meshes.init(allocator),
         };
@@ -106,10 +115,12 @@ pub const MeshAllocator = struct {
         c.vmaDestroyBuffer(this.vk_allocator, this.mesh_storage_buffer, this.mesh_storage_allocation);
         c.vmaDestroyBuffer(this.vk_allocator, this.mesh_indices_buffer, this.mesh_indices_allocation);
         c.vmaDestroyVirtualBlock(this.mesh_buffer_block);
+        c.vmaDestroyVirtualBlock(this.index_buffer_block);
     }
 
     pub fn alloc_mesh(this: *MeshAllocator, info: *const Mesh.CreateInfo) !Allocation {
         std.debug.assert(info.vertices.len > 0);
+        std.debug.assert(info.indices.len > 0);
         var mesh_handle: MeshHandle = undefined;
         var mesh: *?Mesh = undefined;
 
@@ -124,20 +135,34 @@ pub const MeshAllocator = struct {
             };
         }
 
-        var alloc_info = std.mem.zeroes(c.VmaVirtualAllocationCreateInfo);
-        alloc_info.size = @sizeOf(types.Vertex) * info.vertices.len;
-        var offset: c.VkDeviceSize = 0;
-        var virtual_alloc: c.VmaVirtualAllocation = undefined;
+        var geom_alloc_info = std.mem.zeroes(c.VmaVirtualAllocationCreateInfo);
+        geom_alloc_info.size = @sizeOf(types.Vertex) * info.vertices.len;
+        var geom_offset: c.VkDeviceSize = 0;
+        var geom_virtual_alloc: c.VmaVirtualAllocation = undefined;
 
-        const res = c.vmaVirtualAllocate(this.mesh_buffer_block, &alloc_info, &virtual_alloc, &offset);
-        if (res == c.VK_SUCCESS) {
+        const res_geom = c.vmaVirtualAllocate(this.mesh_buffer_block, &geom_alloc_info, &geom_virtual_alloc, &geom_offset);
+
+        var index_alloc_info = std.mem.zeroes(c.VmaVirtualAllocationCreateInfo);
+        index_alloc_info.size = @sizeOf(u32) * info.indices.len;
+        var index_offset: c.VkDeviceSize = 0;
+        var index_virtual_alloc: c.VmaVirtualAllocation = undefined;
+        const res_index = c.vmaVirtualAllocate(this.index_buffer_block, &index_alloc_info, &index_virtual_alloc, &index_offset);
+        std.debug.print("alloc mesh geo off {d} ind {d}\n", .{ geom_offset, index_offset });
+        if (res_geom == c.VK_SUCCESS and res_index == c.VK_SUCCESS) {
             mesh.* = Mesh{
-                .allocation = virtual_alloc,
-                .span = types.Span{
-                    .offset = offset,
-                    .size = alloc_info.size,
+                .geom_allocation = geom_virtual_alloc,
+                .geometry_span = types.Span{
+                    .value_offset = geom_offset / @sizeOf(types.Vertex),
+                    .offset = geom_offset,
+                    .size = geom_alloc_info.size,
                 },
-                .num_vertices = @intCast(info.vertices.len),
+                .index_allocation = index_virtual_alloc,
+                .index_span = types.Span{
+                    .value_offset = index_offset / @sizeOf(u32),
+                    .offset = index_offset,
+                    .size = index_alloc_info.size,
+                },
+                .num_vertices = @intCast(info.indices.len),
             };
             return .{
                 .mesh = mesh.*.?,
@@ -159,6 +184,7 @@ pub const MeshAllocator = struct {
     pub fn free_mesh(this: *MeshAllocator, mesh_handle: MeshHandle) void {
         const mesh = this.all_meshes.items[mesh_handle.id].?;
         this.all_meshes.items[mesh_handle.id] = null;
-        c.vmaVirtualFree(this.mesh_buffer_block, mesh.allocation);
+        c.vmaVirtualFree(this.mesh_buffer_block, mesh.geom_allocation);
+        c.vmaVirtualFree(this.index_buffer_block, mesh.index_allocation);
     }
 };

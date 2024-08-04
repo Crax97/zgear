@@ -40,6 +40,7 @@ layout(push_constant) uniform TexDrawConstants {
   TextureDrawInfoBase base;
   SceneDataBase scene_base;
   uint geometry_offset;
+  uint index_offset;
 };
 
 layout(location = 0) out vec2 uv;
@@ -50,8 +51,8 @@ layout(location = 4) out vec3 vert_position;
 layout(location = 5) out vec3 world_position;
 void main() {
 
-  uint idx = indices[geometry_offset + gl_VertexIndex];
-  Vertex vert = vertices[idx];
+  uint idx = indices[index_offset + gl_VertexIndex];
+  Vertex vert = vertices[geometry_offset + idx];
 
   TexData tex_data = base.data[gl_InstanceIndex];
   vec2 tex_size = textureSize(tex2d_samplers[tex_data.tex_id], 0);

@@ -51,4 +51,9 @@ layout(location = 5) in vec3 world_position;
 
 layout(location = 0) out vec4 color;
 
-void main() { color = vertex_color; }
+void main() {
+    vec3 lightdir = normalize(vec3(-5.0, 10.0, -2.0) - world_position);
+    float d = clamp(dot(normal, lightdir), 0.0, 1.0) * 0.3;
+    vec3 base = vertex_color.xyz + vec3(d);
+    color = vec4(base, 1.0);
+}

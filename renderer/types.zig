@@ -22,6 +22,7 @@ pub const MeshHandle = Handle(Mesh);
 pub const BufferHandle = Handle(Buffer);
 
 pub const Span = struct {
+    value_offset: usize,
     offset: c.VkDeviceSize,
     size: c.VkDeviceSize,
 };
@@ -54,8 +55,10 @@ pub const Mesh = struct {
         vertices: []const Vertex,
         indices: []const u32,
     };
-    span: Span,
-    allocation: c.VmaVirtualAllocation,
+    geometry_span: Span,
+    index_span: Span,
+    geom_allocation: c.VmaVirtualAllocation,
+    index_allocation: c.VmaVirtualAllocation,
     num_vertices: u32,
 };
 
