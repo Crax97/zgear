@@ -2,6 +2,7 @@ const std = @import("std");
 
 const vec = @import("vec.zig");
 const mat = @import("mat.zig");
+const quat = @import("quat.zig");
 
 fn rect_t(comptime T: type, comptime N: comptime_int) type {
     return struct {
@@ -53,6 +54,8 @@ fn rect_t(comptime T: type, comptime N: comptime_int) type {
     };
 }
 
+pub const Real = f32;
+
 pub const Vec2 = vec.vec_t(f32, 2);
 pub const Vec3 = vec.vec_t(f32, 3);
 pub const Vec4 = vec.vec_t(f32, 4);
@@ -63,6 +66,8 @@ pub const Mat4 = mat.mat_t(f32, 4);
 
 pub const Rect2 = rect_t(f32, 2);
 pub const Rect3 = rect_t(f32, 3);
+
+pub const Quat = quat.quat_t(Real);
 
 pub fn vec2(x: f32, y: f32) Vec2 {
     return Vec2.new(.{ x, y });
@@ -354,6 +359,14 @@ test "Lookat" {
     try std.testing.expect(m.row(2).eql_approx(vec4(0.0, 0.0, 1.0, 0.0), 0.05));
 }
 
+test "Quat inverse" {
+    const rand = random_quat();
+    const inverse = rand.inverse();
+    const i = rand.mul(inverse);
+    print_quat(i);
+    try std.testing.expect(i.eq_approx(Quat.IDENTITY, 0.005));
+}
+
 fn print_mat(comptime N: comptime_int, m: mat.mat_t(f32, N)) void {
     for (0..N) |j| {
         for (0..N) |i| {
@@ -368,4 +381,36 @@ fn print_vec(comptime N: comptime_int, m: vec.vec_t(f32, N)) void {
         std.debug.print("{d} ", .{m.data[i]});
     }
     std.debug.print("\n", .{});
+}
+
+fn print_quat(q: Quat) void {
+    for (0..4) |i| {
+        std.debug.print("{d} ", .{q.data.array[i]});
+    }
+    std.debug.print("\n", .{});
+}
+
+fn random_real() Real {
+    const r = struct {
+        var random = bl: {
+            var rand = std.rand.DefaultPrng.init(0);
+            break :bl rand.random();
+        };
+    };
+
+    return r.random.float(Real);
+}
+fn random_quat() Quat {
+    return Quat.new(.{
+        random_real(),
+        random_real(),
+        random_real(),
+        random_real(),
+    });
+}
+
+fn random_rotation_quat() Quat {
+    const angl = random_real() * 2.0 * std.math.pi;
+    const axis = vec3(random_real(), random_real(), random_real());
+    return Quat.new_angle_axis(.{ angl, axis });
 }
