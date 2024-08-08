@@ -1,5 +1,6 @@
 const std = @import("std");
 const vec = @import("vec.zig");
+const quat = @import("quat.zig");
 const scalar = vec.scalar;
 
 // Matrices are column-major

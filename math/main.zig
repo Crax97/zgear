@@ -85,6 +85,8 @@ pub fn vec4(x: f32, y: f32, z: f32, w: f32) Vec4 {
     return Vec4.new(.{ x, y, z, w });
 }
 
+pub const Up = vec3(0.0, 1.0, 0.0);
+
 pub fn quat(w: Real, x: Real, y: Real, z: Real) Quat {
     return Quat.new(.{ w, x, y, z });
 }
@@ -182,7 +184,7 @@ pub fn mat_to_euler_t(comptime T: type, m: mat.mat_t(T, 4)) vec.vec_t(T, 3) {
     var p: f32 = undefined;
     var b: f32 = undefined;
     var h: f32 = undefined;
-    const sp = -m.el(2, 0);
+    const sp = -m.el(2, 1);
     if (sp <= -1.0) {
         p = -std.math.pi / 2.0;
     } else if (sp >= 1.0) {
@@ -198,7 +200,61 @@ pub fn mat_to_euler_t(comptime T: type, m: mat.mat_t(T, 4)) vec.vec_t(T, 3) {
         h = atan2(m.el(2, 0), m.el(2, 2));
         b = atan2(m.el(0, 1), m.el(1, 1));
     }
-    return vec3(p, b, h);
+    return vec3(p, h, b);
+}
+
+pub fn mat_to_quat(m: Mat4) Quat {
+    return mat_to_quat_t(f32, m);
+}
+
+pub fn mat_to_quat_t(comptime T: type, m: mat.mat_t(T, 4)) qua.quat_t(T) {
+    const m00 = m.el(0, 0);
+    const m01 = m.el(0, 1);
+    const m02 = m.el(0, 2);
+    const m10 = m.el(1, 0);
+    const m11 = m.el(1, 1);
+    const m12 = m.el(1, 2);
+    const m20 = m.el(2, 0);
+    const m21 = m.el(2, 1);
+    const m22 = m.el(2, 2);
+    var q: qua.quat_t(T) = undefined;
+    var t: T = undefined;
+    if (m22 < 0.0) {
+        if (m00 > m11) {
+            t = 1.0 + m00 - m11 - m22;
+            q = quat(t, m01 + m10, m20 + m02, m12 - m21);
+        } else {
+            t = 1.0 - m00 + m11 - m22;
+            q = quat(m01 + m10, t, m12 + m21, m20 - m02);
+        }
+    } else {
+        if (m00 < -m11) {
+            t = 1.0 - m00 - m11 + m22;
+            q = quat(m20 + m02, m12 + m21, t, m01 - m10);
+        } else {
+            t = 1.0 + m00 + m11 + m22;
+            q = quat(m12 - m21, m20 - m02, m01 - m10, t);
+        }
+    }
+
+    return q.scale(0.5 / @sqrt(t));
+}
+
+pub fn quat_to_mat(q: Quat) Mat4 {
+    return quat_to_mat_t(Real, q);
+}
+
+pub fn quat_to_mat_t(comptime T: type, q: qua.quat_t(T)) mat.mat_t(T, 4) {
+    const qw, const qx, const qy, const qz = q.data.array;
+    const xx = qx * qx;
+    const yy = qy * qy;
+    const zz = qz * qz;
+    return mat.mat_t(T, 4).new_rows(.{
+        1.0 - 2.0 * yy - 2.0 * zz,     2.0 * qx * qy + 2.0 * qw * qz, 2.0 * qx * qz - 2.0 * qw * qy, 0.0,
+        2.0 * qx * qy - 2.0 * qw * qz, 1.0 - 2.0 * xx - 2.0 * zz,     2.0 * qy * qz + 2.0 * qw * qx, 0.0,
+        2.0 * qx * qz + 2.0 * qw * qy, 2.0 * qy * qz - 2.0 * qw * qx, 1.0 - 2.0 * xx - 2.0 * yy,     0.0,
+        0.0,                           0.0,                           0.0,                           1.0,
+    });
 }
 
 pub fn ortho(left: f32, right: f32, bottom: f32, top: f32, near: f32, far: f32) Mat4 {
@@ -239,7 +295,7 @@ pub fn look_at(eye: Vec3, target: Vec3, up: Vec3) Mat4 {
 
 pub fn look_at_t(comptime T: type, eye: vec.vec_t(T, 3), target: vec.vec_t(T, 3), up: vec.vec_t(T, 3)) mat.mat_t(T, 4) {
     const d = target.sub(eye).normalize();
-    const r = cross(&d, up).normalize();
+    const r = cross(&up, d).normalize().neg();
     const u = cross(&d, r).normalize();
 
     return mat.mat_t(T, 4).new_cols(.{

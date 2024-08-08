@@ -44,22 +44,14 @@ pub fn quat_t(comptime T: type) type {
             return This.new(c, s * rotation_axis.x(), s * rotation_axis.y(), s * rotation_axis.z());
         }
 
-        pub fn new_from_euler(pitch: T, yaw: T, roll: T) This {
+        pub fn new_from_euler(euler: Vec) This {
+            const pitch, const yaw, const roll = euler.data;
             // TODO: expand properly
+
             const pquat = new(.{ cos(pitch / 2.0), sin(pitch / 2.0), 0.0, 0.0 });
-            const yquat = new(.{ cos(yaw / 2.0), 0.0, sin(yaw / 2.0), 0.0 });
+            const yquat = new(.{ -cos(yaw / 2.0), 0.0, sin(yaw / 2.0), 0.0 });
             const rquat = new(.{ cos(roll / 2.0), 0.0, 0.0, sin(roll / 2.0) });
             return pquat.mul(rquat).mul(yquat);
-        }
-
-        pub fn to_matrix(this: *const This) Mat {
-            const qw, const qx, const qy, const qz = this.data.array;
-            return Mat.new_rows(.{
-                1.0 - 2.0 * qy * qy - 2.0 * qz * qz, 2.0 * qx * qy + 2.0 * qw * qz,       2.0 * qx * qz - 2.0 * qw * qy,       0.0,
-                2.0 * qx * qy - 2.0 * qw * qz,       1.0 - 2.0 * qx * qx - 2.0 * qz * qz, 2.0 * qy * qz + 2.0 * qw * qx,       0.0,
-                2.0 * qx * qz + 2.0 * qw * qy,       2.0 * qy * qz - 2.0 * qw * qx,       1.0 - 2.0 * qx * qx - 2.0 * qy * qy, 0.0,
-                0.0,                                 0.0,                                 0.0,                                 1.0,
-            });
         }
 
         pub fn to_euler(this: *const This) Vec {

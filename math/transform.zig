@@ -2,11 +2,7 @@ const std = @import("std");
 const main = @import("main.zig");
 
 const Mat4 = main.Mat4;
-const Vec2 = main.Vec2;
+const Vec3 = main.Vec3;
+const Quat = main.Quat;
 
-pub const Transform2D = struct {
-    position: Vec2,
-    rotation: f32,
-    z_index: f32,
-    scale: Vec2,
-};
+pub const Transform = struct { position: Vec3 = Vec3.ZERO, rotation: Quat = Quat.IDENTITY, scale: Vec3 = Vec3.ONE, changed: bool = false, local_to_world: Mat4 };

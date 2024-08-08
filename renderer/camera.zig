@@ -29,7 +29,7 @@ pub const Camera = struct {
     extents: Vec2 = Vec2.new(.{ 1240, 720 }),
     pub fn view_matrix(this: *const Camera) Mat4 {
         return math.transformation(this.position, vec3(this.zoom, this.zoom, 1.0), Vec3.ZERO)
-            .mul(this.rotation.to_matrix())
+            .mul(math.quat_to_mat(this.rotation))
             .invert().?;
     }
 

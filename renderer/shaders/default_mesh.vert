@@ -59,10 +59,9 @@ void main() {
 
   mat4 proj = scene_base.scene_data[0].projection;
   mat4 view = scene_base.scene_data[0].view;
-  mat4 vp = view * tex_data.transform;
+  mat4 mv = view * tex_data.transform;
 
-  vec4 position_world = vp * vec4(vert.pos_uvx.xyz, 1.0);
-
+  vec4 position_world = mv * vec4(vert.pos_uvx.xyz, 1.0);
   vec4 position_camera = proj * position_world;
 
   gl_Position = position_camera;
