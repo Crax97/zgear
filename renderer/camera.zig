@@ -5,6 +5,7 @@ const math = @import("math");
 const Vec3 = math.Vec3;
 const Vec2 = math.Vec2;
 const Mat4 = math.Mat4;
+const Quat = math.Quat;
 
 const vec3 = math.vec3;
 
@@ -17,7 +18,7 @@ pub const ProjectionMode = union(ProjectionModeType) {
 
 pub const Camera = struct {
     position: Vec3 = Vec3.ZERO,
-    rotation: f32 = 0.0,
+    rotation: Quat = Quat.IDENTITY,
 
     fov_degs: f32 = 90.0,
     near: f32 = 0.01,
@@ -27,11 +28,8 @@ pub const Camera = struct {
     zoom: f32 = 1.0,
     extents: Vec2 = Vec2.new(.{ 1240, 720 }),
     pub fn view_matrix(this: *const Camera) Mat4 {
-        return math.transformation(
-            this.position,
-            vec3(this.zoom, this.zoom, 1.0),
-            vec3(0.0, 0.0, std.math.degreesToRadians(this.rotation)),
-        )
+        return math.transformation(this.position, vec3(this.zoom, this.zoom, 1.0), Vec3.ZERO)
+            .mul(this.rotation.to_matrix())
             .invert().?;
     }
 

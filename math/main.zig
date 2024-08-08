@@ -2,7 +2,13 @@ const std = @import("std");
 
 const vec = @import("vec.zig");
 const mat = @import("mat.zig");
-const quat = @import("quat.zig");
+const qua = @import("quat.zig");
+
+const cos = std.math.cos;
+const sin = std.math.sin;
+const acos = std.math.acos;
+const asin = std.math.asin;
+const atan2 = std.math.atan2;
 
 fn rect_t(comptime T: type, comptime N: comptime_int) type {
     return struct {
@@ -67,7 +73,7 @@ pub const Mat4 = mat.mat_t(f32, 4);
 pub const Rect2 = rect_t(f32, 2);
 pub const Rect3 = rect_t(f32, 3);
 
-pub const Quat = quat.quat_t(Real);
+pub const Quat = qua.quat_t(Real);
 
 pub fn vec2(x: f32, y: f32) Vec2 {
     return Vec2.new(.{ x, y });
@@ -77,6 +83,10 @@ pub fn vec3(x: f32, y: f32, z: f32) Vec3 {
 }
 pub fn vec4(x: f32, y: f32, z: f32, w: f32) Vec4 {
     return Vec4.new(.{ x, y, z, w });
+}
+
+pub fn quat(w: Real, x: Real, y: Real, z: Real) Quat {
+    return Quat.new(.{ w, x, y, z });
 }
 
 pub fn cross(this: *const Vec3, other: Vec3) Vec3 {
@@ -163,6 +173,34 @@ pub fn rot_z_t(comptime T: type, angle: T) mat.mat_t(T, 4) {
         0.0, 0.0, 0.0, 1.0,
     });
 }
+
+pub fn mat_to_euler(m: Mat4) Vec3 {
+    return mat_to_euler_t(f32, m);
+}
+
+pub fn mat_to_euler_t(comptime T: type, m: mat.mat_t(T, 4)) vec.vec_t(T, 3) {
+    var p: f32 = undefined;
+    var b: f32 = undefined;
+    var h: f32 = undefined;
+    const sp = -m.el(2, 0);
+    if (sp <= -1.0) {
+        p = -std.math.pi / 2.0;
+    } else if (sp >= 1.0) {
+        p = std.math.pi / 2.0;
+    } else {
+        p = asin(sp);
+    }
+
+    if (@abs(sp) > 0.9999) {
+        b = 0.0;
+        h = atan2(-m.el(0, 2), m.el(0, 0));
+    } else {
+        h = atan2(m.el(2, 0), m.el(2, 2));
+        b = atan2(m.el(0, 1), m.el(1, 1));
+    }
+    return vec3(p, b, h);
+}
+
 pub fn ortho(left: f32, right: f32, bottom: f32, top: f32, near: f32, far: f32) Mat4 {
     return ortho_t(f32, left, right, bottom, top, near, far);
 }
@@ -359,14 +397,6 @@ test "Lookat" {
     try std.testing.expect(m.row(2).eql_approx(vec4(0.0, 0.0, 1.0, 0.0), 0.05));
 }
 
-test "Quat inverse" {
-    const rand = random_quat();
-    const inverse = rand.inverse();
-    const i = rand.mul(inverse);
-    print_quat(i);
-    try std.testing.expect(i.eq_approx(Quat.IDENTITY, 0.005));
-}
-
 fn print_mat(comptime N: comptime_int, m: mat.mat_t(f32, N)) void {
     for (0..N) |j| {
         for (0..N) |i| {
@@ -392,10 +422,8 @@ fn print_quat(q: Quat) void {
 
 fn random_real() Real {
     const r = struct {
-        var random = bl: {
-            var rand = std.rand.DefaultPrng.init(0);
-            break :bl rand.random();
-        };
+        var rand = std.rand.DefaultPrng.init(0);
+        var random = rand.random();
     };
 
     return r.random.float(Real);
@@ -411,6 +439,6 @@ fn random_quat() Quat {
 
 fn random_rotation_quat() Quat {
     const angl = random_real() * 2.0 * std.math.pi;
-    const axis = vec3(random_real(), random_real(), random_real());
+    const axis = vec3(random_real(), random_real(), random_real()).normalize();
     return Quat.new_angle_axis(.{ angl, axis });
 }

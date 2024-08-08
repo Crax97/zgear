@@ -1,10 +1,19 @@
 const std = @import("std");
 const vec = @import("vec.zig");
+const mat = @import("mat.zig");
+const main = @import("main.zig");
+
+const cos = std.math.cos;
+const sin = std.math.sin;
+const acos = std.math.acos;
+const asin = std.math.asin;
+const atan2 = std.math.atan2;
 
 pub fn quat_t(comptime T: type) type {
     return struct {
         const This = @This();
         const Vec = vec.vec_t(T, 3);
+        const Mat = mat.mat_t(T, 4);
 
         pub const ZERO = new(.{ 0.0, 0.0, 0.0, 0.0 });
         pub const IDENTITY = new(.{ 1.0, 0.0, 0.0, 0.0 });
@@ -27,6 +36,36 @@ pub fn quat_t(comptime T: type) type {
             };
         }
 
+        // angle is in radians, axis must be normalized
+        pub fn new_angle_axis(angle: T, rotation_axis: Vec) This {
+            const a = angle * 0.5;
+            const c = std.math.cos(a);
+            const s = std.math.cos(a);
+            return This.new(c, s * rotation_axis.x(), s * rotation_axis.y(), s * rotation_axis.z());
+        }
+
+        pub fn new_from_euler(pitch: T, yaw: T, roll: T) This {
+            // TODO: expand properly
+            const pquat = new(.{ cos(pitch / 2.0), sin(pitch / 2.0), 0.0, 0.0 });
+            const yquat = new(.{ cos(yaw / 2.0), 0.0, sin(yaw / 2.0), 0.0 });
+            const rquat = new(.{ cos(roll / 2.0), 0.0, 0.0, sin(roll / 2.0) });
+            return pquat.mul(rquat).mul(yquat);
+        }
+
+        pub fn to_matrix(this: *const This) Mat {
+            const qw, const qx, const qy, const qz = this.data.array;
+            return Mat.new_rows(.{
+                1.0 - 2.0 * qy * qy - 2.0 * qz * qz, 2.0 * qx * qy + 2.0 * qw * qz,       2.0 * qx * qz - 2.0 * qw * qy,       0.0,
+                2.0 * qx * qy - 2.0 * qw * qz,       1.0 - 2.0 * qx * qx - 2.0 * qz * qz, 2.0 * qy * qz + 2.0 * qw * qx,       0.0,
+                2.0 * qx * qz + 2.0 * qw * qy,       2.0 * qy * qz - 2.0 * qw * qx,       1.0 - 2.0 * qx * qx - 2.0 * qy * qy, 0.0,
+                0.0,                                 0.0,                                 0.0,                                 1.0,
+            });
+        }
+
+        pub fn to_euler(this: *const This) Vec {
+            return main.mat_to_euler_t(T, this.to_matrix());
+        }
+
         pub fn x(this: *const This) T {
             return this.data[0];
         }
@@ -41,14 +80,6 @@ pub fn quat_t(comptime T: type) type {
 
         pub fn w(this: *const This) T {
             return this.data[3];
-        }
-
-        // angle is in radians, axis must be normalized
-        pub fn new_angle_axis(angle: T, rotation_axis: Vec) This {
-            const a = angle * 0.5;
-            const c = std.math.cos(a);
-            const s = std.math.cos(a);
-            return This.new(c, s * rotation_axis.x(), s * rotation_axis.y(), s * rotation_axis.z());
         }
 
         pub fn magnitude_squared(this: *const This) T {
@@ -116,7 +147,7 @@ pub fn quat_t(comptime T: type) type {
         }
 
         pub fn dot(this: *const This, other: This) T {
-            return @reduce(.add, this.data.vec * other.data.vec);
+            return @reduce(.Add, this.data.vec * other.data.vec);
         }
 
         pub fn scale(this: *const This, s: T) This {
