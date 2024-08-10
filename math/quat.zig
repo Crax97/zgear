@@ -166,9 +166,9 @@ pub fn quat_t(comptime T: type) type {
         }
 
         pub fn rotate(this: *const This, p: vec.vec_t(T, 3)) vec.vec_t(T, 3) {
-            const p_quat = new(0.0, p.x(), p.y(), p.z());
+            const p_quat = new(.{ 0.0, p.x(), p.y(), p.z() });
             const inv = this.inverse();
-            const r = this.mul(p_quat).mul(inv);
+            const r = inv.mul(p_quat).mul(this.*);
             return vec.vec_t(T, 3).new(.{ r.data.fields.x, r.data.fields.y, r.data.fields.z });
         }
 

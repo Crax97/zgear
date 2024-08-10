@@ -3,6 +3,7 @@ const std = @import("std");
 const vec = @import("vec.zig");
 const mat = @import("mat.zig");
 const qua = @import("quat.zig");
+const tra = @import("transform.zig");
 
 const cos = std.math.cos;
 const sin = std.math.sin;
@@ -75,6 +76,8 @@ pub const Rect3 = rect_t(f32, 3);
 
 pub const Quat = qua.quat_t(Real);
 
+pub const Transform = tra.Transform;
+
 pub fn vec2(x: f32, y: f32) Vec2 {
     return Vec2.new(.{ x, y });
 }
@@ -86,6 +89,8 @@ pub fn vec4(x: f32, y: f32, z: f32, w: f32) Vec4 {
 }
 
 pub const Up = vec3(0.0, 1.0, 0.0);
+pub const Forward = vec3(0.0, 0.0, 1.0);
+pub const Right = vec3(-1.0, 0.0, 0.0);
 
 pub fn quat(w: Real, x: Real, y: Real, z: Real) Quat {
     return Quat.new(.{ w, x, y, z });
@@ -295,8 +300,8 @@ pub fn look_at(eye: Vec3, target: Vec3, up: Vec3) Mat4 {
 
 pub fn look_at_t(comptime T: type, eye: vec.vec_t(T, 3), target: vec.vec_t(T, 3), up: vec.vec_t(T, 3)) mat.mat_t(T, 4) {
     const d = target.sub(eye).normalize();
-    const r = cross(&up, d).normalize().neg();
-    const u = cross(&d, r).normalize();
+    const r = cross(&up, d).normalize();
+    const u = cross(&r, d).normalize().neg();
 
     return mat.mat_t(T, 4).new_cols(.{
         r.x(), u.x(), d.x(), 0.0,
