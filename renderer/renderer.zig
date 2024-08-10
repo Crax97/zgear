@@ -1252,7 +1252,7 @@ pub const Renderer = struct {
                 .sType = c.VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
                 .pNext = null,
                 .primitiveRestartEnable = c.VK_FALSE,
-                .topology = c.VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP,
+                .topology = c.VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
             },
             .pTessellationState = null,
             .pViewportState = &c.VkPipelineViewportStateCreateInfo{ .sType = c.VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO, .pNext = null, .viewportCount = 1, .scissorCount = 1, .pScissors = null, .pViewports = null },
