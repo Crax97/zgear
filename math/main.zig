@@ -287,10 +287,10 @@ pub fn perspective_t(comptime T: type, aspect: T, fovy_degrees: T, near: T, far:
     const half_fov_rad = std.math.degreesToRadians(fovy_degrees) * 0.5;
     const tan = std.math.tan(half_fov_rad);
     return mat.mat_t(T, 4).new_rows(.{
-        aspect / tan, 0.0,        0.0,                 0.0,
-        0.0,          -1.0 / tan, 0.0,                 0.0,
-        0.0,          0.0,        -far / (near - far), (far * near) / (near - far),
-        0.0,          0.0,        1,                   0.0,
+        -aspect / tan, 0.0,       0.0,                0.0,
+        0.0,           1.0 / tan, 0.0,                0.0,
+        0.0,           0.0,       far / (far - near), -(near * far) / (far - near),
+        0.0,           0.0,       1,                  0.0,
     });
 }
 
@@ -300,8 +300,8 @@ pub fn look_at(eye: Vec3, target: Vec3, up: Vec3) Mat4 {
 
 pub fn look_at_t(comptime T: type, eye: vec.vec_t(T, 3), target: vec.vec_t(T, 3), up: vec.vec_t(T, 3)) mat.mat_t(T, 4) {
     const d = target.sub(eye).normalize();
-    const r = cross(&up, d).normalize();
-    const u = cross(&r, d).normalize().neg();
+    const r = cross(&d, up).normalize();
+    const u = cross(&d, r).normalize();
 
     return mat.mat_t(T, 4).new_cols(.{
         r.x(), u.x(), d.x(), 0.0,
@@ -454,8 +454,31 @@ test "Matrix inverse" {
 }
 
 test "Lookat" {
-    const m = look_at(vec3(0.0, 10.0, 0.0), vec3(0.0, 10.0, 5.0), vec3(0.0, 1.0, 0.0));
-    try std.testing.expect(m.row(2).eql_approx(vec4(0.0, 0.0, 1.0, 0.0), 0.05));
+    {
+        const m = look_at(vec3(0.0, 10.0, 0.0), vec3(0.0, 10.0, 5.0), vec3(0.0, 1.0, 0.0));
+        try std.testing.expect(m.row(2).eql_approx(vec4(0.0, 0.0, 1.0, 0.0), 0.05));
+    }
+    {
+        const m = look_at(vec3(0.0, 10.0, 0.0), vec3(-15.0, 10.0, 0.0), vec3(0.0, 1.0, 0.0));
+        try std.testing.expect(m.row(2).eql_approx(vec4(-1.0, 0.0, 0.0, 0.0), 0.05));
+    }
+    {
+        const m = look_at(vec3(0.0, 10.0, 0.0), vec3(0.0, 15.0, 0.0), vec3(0.0, 0.0, -1.0));
+        try std.testing.expect(m.row(2).eql_approx(vec4(0.0, 1.0, 0.0, 0.0), 0.05));
+    }
+}
+
+test "Quaternion rotation" {
+    const q = Quat.new_from_euler(vec3(0.0, std.math.pi * 0.5, 0.0));
+    const p = vec3(0.0, 0.0, 1.0);
+    {
+        const rotated = q.rotate(p);
+        try std.testing.expect(rotated.eql_approx(vec3(1.0, 0.0, 0.0), 0.005));
+    }
+    {
+        const rotated = q.inverse().rotate(p);
+        try std.testing.expect(rotated.eql_approx(vec3(-1.0, 0.0, 0.0), 0.005));
+    }
 }
 
 fn print_mat(comptime N: comptime_int, m: mat.mat_t(f32, N)) void {

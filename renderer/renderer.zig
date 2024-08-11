@@ -743,7 +743,7 @@ pub const Renderer = struct {
     }
 
     fn update_primitive_buffers(
-        this: *const Renderer,
+        this: *Renderer,
         render_state: *RenderState,
         viewport_extents: Vec2,
     ) void {

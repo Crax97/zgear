@@ -81,6 +81,14 @@ pub fn mat_t(comptime T: type, comptime N: comptime_int) type {
             return res;
         }
 
+        pub fn transform(this: *const This, v: Vec) Vec {
+            var res = Vec.ZERO;
+            inline for (0..N) |i| {
+                const r = this.col(i);
+                res.data[i] = r.dot(v);
+            }
+            return res;
+        }
         pub fn expand(this: *const This) mat_t(T, N + 1) {
             var ret = mat_t(T, N + 1).ZEROES;
 

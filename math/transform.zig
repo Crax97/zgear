@@ -51,17 +51,17 @@ pub const Transform = struct {
 
     pub fn left(this: *Transform) Vec3 {
         this.recompute_local_to_world_if_needed();
-        return this.local_to_world.row(0).truncate();
+        return this.local_to_world.row(0).truncate().normalize();
     }
 
     pub fn up(this: *Transform) Vec3 {
         this.recompute_local_to_world_if_needed();
-        return this.local_to_world.row(1).truncate();
+        return this.local_to_world.row(1).truncate().normalize();
     }
 
     pub fn forward(this: *Transform) Vec3 {
         this.recompute_local_to_world_if_needed();
-        return this.local_to_world.row(2).truncate();
+        return this.local_to_world.row(2).truncate().normalize();
     }
 
     pub fn matrix(this: *Transform) Mat4 {
